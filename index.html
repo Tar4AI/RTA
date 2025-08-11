@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <title>Mobile RTA (Mic) — Log Scale + Peak Hold</title>
+  <title>Mobile RTA (Mic) — FFT • 1/3 Oct • Spectrogram</title>
   <style>
     :root{
       --bg1:#0b1220; --bg2:#0a1120; --card:#111827; --text:#e5e7eb; --muted:#9ca3af; --accent:#34d399; --accent2:#60a5fa; --peak:#a78bfa;
+      --grid: rgba(255,255,255,.05); --frame: rgba(255,255,255,.08); --label: rgba(255,255,255,.60);
     }
     html,body{margin:0;height:100%;background:radial-gradient(1200px 600px at 70% -10%, #0f1730 10%, var(--bg1) 60%, var(--bg2) 100%);color:var(--text);font-family:system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans Thai", sans-serif}
     .wrap{display:flex;flex-direction:column;gap:12px;max-width:920px;margin:0 auto;padding:12px}
@@ -18,12 +19,12 @@
     button.ghost{background:#1f2937}
     label{font-size:12px;color:var(--muted)}
     .meters{display:grid;grid-template-columns:1fr;gap:12px}
-    canvas{width:100%;height:240px;background:#0b1220;border-radius:12px}
+    canvas{width:100%;height:320px;background:#0b1220;border-radius:12px}
     .hint{font-size:12px;color:var(--muted)}
     .kv{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
     .kv div{background:#0e1628;border:1px solid #1f2937;border-radius:12px;padding:8px}
     .kv b{display:block;color:#cbd5e1;font-size:12px;margin-bottom:4px}
-    @media(min-width:720px){.meters{grid-template-columns:1fr 1fr}}
+    @media(min-width:720px){.meters{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -32,7 +33,7 @@
       <div class="row" style="justify-content:space-between">
         <div>
           <h2 style="margin:0 0 4px 0">Mobile RTA (ไมค์มือถือ)</h2>
-          <div class="hint">สเกลแกน X = Log (20 Hz → 20 kHz) • กด Hold Peak เพื่อค้างค่าสูงสุด • ใช้หูฟังเพื่อเลี่ยงฟีดแบ็ก • ค่าคือประมาณการ (ไมค์มือถือไม่แฟลต)</div>
+          <div class="hint">แกน X = Log (20 Hz → 20 kHz) • Hold Peak สำหรับ FFT/1⁄3 • Spectrogram ไหลจากล่างขึ้นบน • ใช้ผ่าน HTTPS</div>
         </div>
         <div class="row">
           <button id="btnStart">▶️ เริ่มวัด</button>
@@ -42,7 +43,14 @@
         </div>
       </div>
       <div class="row" style="margin-top:8px">
-        <label>FFT
+        <label>Mode
+          <select id="mode">
+            <option value="fft" selected>FFT</option>
+            <option value="oct">1/3 Octave</option>
+            <option value="spec">Spectrogram</option>
+          </select>
+        </label>
+        <label> FFT Size
           <select id="fft">
             <option value="2048">2048</option>
             <option value="4096" selected>4096</option>
@@ -65,38 +73,55 @@
     </div>
 
     <div class="meters">
-      <div class="card">
+      <!-- FFT: เต็มแนวนอน -->
+      <div id="fftCard" class="card">
         <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
           <b>RTA แบบละเอียด (FFT, Log Frequency)</b>
           <span class="hint" id="labelRate">—</span>
         </div>
-        <canvas id="fftCanvas" width="1000" height="320"></canvas>
+        <canvas id="fftCanvas" width="1200" height="320"></canvas>
       </div>
-      <div class="card">
+      
+      <!-- 1/3 Octave: เต็มแนวนอน พร้อม Peak Hold ใช้สวิตช์เดียวกัน -->
+      <div id="octCard" class="card" style="display:none">
         <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
           <b>RTA แบบ 1/3 Octave (Log Axis)</b>
           <span class="hint" id="labelOct">20 Hz – 20 kHz</span>
         </div>
-        <canvas id="octCanvas" width="1000" height="320"></canvas>
+        <canvas id="octCanvas" width="1200" height="320"></canvas>
+      </div>
+      
+      <!-- Spectrogram: เต็มแนวนอน ไม่มี hold peak -->
+      <div id="heatCard" class="card" style="display:none">
+        <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
+          <b>Spectrogram / Heatmap (Log Frequency)</b>
+          <span class="hint">เวลาไหลจากล่างขึ้นบน • ความถี่แกน X เป็น Log</span>
+        </div>
+        <div class="stack" style="position:relative; height:320px;">
+          <canvas id="heatCanvas" width="1200" height="320" style="position:absolute; inset:0; border-radius:12px; background:#0b1220"></canvas>
+          <canvas id="heatAxis" width="1200" height="320" style="position:absolute; inset:0; pointer-events:none;"></canvas>
+        </div>
       </div>
     </div>
 
     <div class="card kv">
-      <div><b>ระดับ RMS (dBFS ประมาณ)</b><span id="rms">—</span></div>
+      <div><b>ระดับ RMS (ดิบ dBFS)</b><span id="rms">—</span></div>
       <div><b>ความถี่พีคโดยประมาณ</b><span id="peak">—</span></div>
     </div>
 
     <div class="card hint">
-      ข้อจำกัด: ไมค์มือถือมักมีฟิลเตอร์, AGC/Noise Suppression และการตอบสนองความถี่ไม่เป็นเส้นตรง จึงใช้ดูแนว EQ ได้ แต่ไม่เท่ากับเครื่องมือวัด SPL มืออาชีพ.
+      ข้อจำกัด: ไมค์มือถือมี DSP/AGC และการตอบสนองความถี่ไม่แฟลต ใช้ดูแนว EQ ได้แต่ไม่ใช่มาตรวัด SPL มืออาชีพ
     </div>
   </div>
 
 <script>
 (() => {
+  // ==== Elements ====
   const btnStart = document.getElementById('btnStart');
   const btnStop = document.getElementById('btnStop');
   const btnHold = document.getElementById('btnHold');
   const btnClear = document.getElementById('btnClear');
+  const modeSel = document.getElementById('mode');
   const fftSel = document.getElementById('fft');
   const smoothing = document.getElementById('smoothing');
   const avgChk = document.getElementById('avg');
@@ -105,290 +130,207 @@
   const ns = document.getElementById('ns');
   const agc = document.getElementById('agc');
 
+  const fftCard = document.getElementById('fftCard');
+  const octCard = document.getElementById('octCard');
+  const heatCard = document.getElementById('heatCard');
+
   const fftCanvas = document.getElementById('fftCanvas');
   const octCanvas = document.getElementById('octCanvas');
+  const heatCanvas = document.getElementById('heatCanvas');
+  const heatAxis = document.getElementById('heatAxis');
   const ctxFFT = fftCanvas.getContext('2d');
   const ctxOct = octCanvas.getContext('2d');
+  const ctxHeat = heatCanvas.getContext('2d');
+  const ctxAxis = heatAxis.getContext('2d');
+
   const labelRate = document.getElementById('labelRate');
   const labelOct = document.getElementById('labelOct');
   const rmsEl = document.getElementById('rms');
   const peakEl = document.getElementById('peak');
 
+  // ==== Audio state ====
   let audioCtx, analyser, micSrc, rafId;
   let dataArray, freqArray;
   let sampleRate = 48000;
   let avgBuffer = null; // exponential averaging per bin
   let running = false;
 
+  // Peak hold buffers
+  let peakArray = null; // FFT bins
+  let peakOct = null;   // 1/3 octave bands
   let holdEnabled = false;
-  let peakArray = null; // Uint8Array for peak-hold in linear magnitude domain (0..255)
 
   // 1/3 octave centers
   const centers = [
     20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500,
     630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 20000
   ];
-  const bands = centers.map(c => ({
-    fc: c,
-    fl: c / Math.pow(2, 1/6),
-    fh: c * Math.pow(2, 1/6)
-  }));
+  const bands = centers.map(c => ({ fc:c, fl: c/Math.pow(2,1/6), fh: c*Math.pow(2,1/6) }));
   labelOct.textContent = `${centers[0]} Hz – ${centers[centers.length-1]} Hz`;
 
+  // ==== Math helpers ====
   function aWeighting(f){
-    const f2 = f*f;
-    const ra = (12200**2 * f2**2) / ((f2 + 20.6**2)*(f2 + 12200**2)*Math.sqrt((f2 + 107.7**2)*(f2 + 737.9**2)));
-    return 20 * Math.log10(ra) + 2.0; // dB
+    const f2=f*f; const ra=(12200**2 * f2**2)/((f2+20.6**2)*(f2+12200**2)*Math.sqrt((f2+107.7**2)*(f2+737.9**2)));
+    return 20*Math.log10(ra)+2.0;
   }
   function dbfs(v){ return 20*Math.log10(v/255 + 1e-12); }
-
-  function freqPerBin(){ return sampleRate / (2*analyser.frequencyBinCount); }
+  function clamp01(v){ return Math.min(1, Math.max(0,v)); }
   function mapLogX(f, width){
-    const fmin = 20;
-    const fmax = Math.min(sampleRate/2, 20000);
-    const lx = (Math.log10(Math.max(f, fmin)) - Math.log10(fmin)) / (Math.log10(fmax) - Math.log10(fmin));
+    const fmin=20; const fmax=Math.min(sampleRate/2,20000);
+    const lx=(Math.log10(Math.max(f,fmin)) - Math.log10(fmin)) / (Math.log10(fmax)-Math.log10(fmin));
     return 40 + lx * (width - 50);
   }
 
+  // ==== Drawing helpers ====
   function drawBackground(ctx){
     const {width:w, height:h} = ctx.canvas;
     ctx.clearRect(0,0,w,h);
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-    ctx.lineWidth = 1;
-
-    // Horizontal grid (approx dB scale)
-    for(let i=0;i<6;i++){
-      const y = (h-20) * (i/5) + 10;
-      ctx.beginPath(); ctx.moveTo(40,y); ctx.lineTo(w-10,y); ctx.stroke();
-    }
-
-    // Vertical grid at common log ticks
+    // grid horiz
+    ctx.strokeStyle = 'var(--grid)';
+    for(let i=0;i<6;i++){ const y=(h-20)*(i/5)+10; ctx.beginPath(); ctx.moveTo(40,y); ctx.lineTo(w-10,y); ctx.stroke(); }
+    // grid vert (log ticks)
+    ctx.strokeStyle = 'var(--grid)';
     const ticks = [20,31.5,40,50,63,80,100,125,160,200,250,315,400,500,630,800,1000,2000,4000,8000,16000];
-    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-    ticks.forEach(t => {
-      const x = mapLogX(t, w);
-      ctx.beginPath(); ctx.moveTo(x,10); ctx.lineTo(x,h-10); ctx.stroke();
-    });
-
-    // Axis box
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-    ctx.strokeRect(40,10,w-50,h-20);
-
-    // Tick labels
-    ctx.fillStyle = 'rgba(255,255,255,0.6)';
-    ctx.font = '12px system-ui';
-    const labelTicks = [31.5,63,125,250,500,1000,2000,4000,8000,16000];
-    labelTicks.forEach(t => {
-      const x = mapLogX(t, w);
-      ctx.fillText(t>=1000? (t/1000)+'k' : t, x-8, h-4);
-    });
+    ticks.forEach(t=>{ const x=mapLogX(t,w); ctx.beginPath(); ctx.moveTo(x,10); ctx.lineTo(x,h-10); ctx.stroke(); });
+    // frame
+    ctx.strokeStyle = 'var(--frame)'; ctx.strokeRect(40,10,w-50,h-20);
+    // labels
+    ctx.fillStyle='var(--label)'; ctx.font='12px system-ui';
+    ;[31.5,63,125,250,500,1000,2000,4000,8000,16000].forEach(t=>{ const x=mapLogX(t,w); ctx.fillText(t>=1000?(t/1000)+'k':t, x-8, h-4); });
   }
 
   function drawFFT(){
-    const {width:w, height:h} = ctxFFT.canvas;
-    drawBackground(ctxFFT);
-    if(!freqArray) return;
+    const {width:w, height:h} = ctxFFT.canvas; drawBackground(ctxFFT); if(!freqArray) return;
+    const N=freqArray.length; const fpb=sampleRate/(2*N);
 
-    const N = freqArray.length;
-    const fpb = sampleRate / (2*N);
+    // peak freq for label
+    let peakBin=0, peakVal=-Infinity; for(let i=0;i<N;i++){ if(freqArray[i]>peakVal){peakVal=freqArray[i]; peakBin=i;} }
+    const peakFreq=Math.round(peakBin*fpb); peakEl.textContent=`${peakFreq} Hz`;
 
-    // peak frequency (linear scan)
-    let peakBin = 0; let peakVal = -Infinity;
-    for(let i=0;i<N;i++){ if(freqArray[i] > peakVal){ peakVal = freqArray[i]; peakBin = i; } }
-    const peakFreq = Math.round(peakBin * fpb);
-    peakEl.textContent = `${peakFreq} Hz`;
+    if(!peakArray || peakArray.length!==N) peakArray=new Uint8Array(N);
+    if(holdEnabled){ for(let i=0;i<N;i++) peakArray[i]=Math.max(peakArray[i], freqArray[i]); }
 
-    // Update peak-hold buffer
-    if(!peakArray || peakArray.length !== N){ peakArray = new Uint8Array(N); }
-    if(holdEnabled){
-      for(let i=0;i<N;i++) peakArray[i] = Math.max(peakArray[i], freqArray[i]);
+    // current (green)
+    ctxFFT.beginPath(); let started=false;
+    for(let i=1;i<N;i++){
+      const f=i*fpb; if(f<20) continue; if(f>20000) break; const x=mapLogX(f,w);
+      const y=10 + (1 - clamp01((dbfs(freqArray[i])+100)/100))*(h-20);
+      if(!started){ ctxFFT.moveTo(x,y); started=true; } else { ctxFFT.lineTo(x,y); }
     }
+    ctxFFT.strokeStyle='#34d399'; ctxFFT.lineWidth=2; ctxFFT.stroke();
 
-    // Draw current spectrum (green)
-    ctxFFT.save();
-    ctxFFT.beginPath();
-    let started = false;
-    for(let i=1; i<N; i++){
-      const f = i * fpb; if(f < 20) continue; if(f > 20000) break;
-      const x = mapLogX(f, w);
-      const db = dbfs(freqArray[i]);
-      const y = 10 + (1 - Math.min(Math.max((db+100)/100, 0), 1))*(h-20);
-      if(!started){ ctxFFT.moveTo(x,y); started = true; } else { ctxFFT.lineTo(x,y); }
+    // peak (purple)
+    ctxFFT.beginPath(); started=false;
+    for(let i=1;i<N;i++){
+      const f=i*fpb; if(f<20) continue; if(f>20000) break; const x=mapLogX(f,w);
+      const y=10 + (1 - clamp01((dbfs(peakArray[i]||0)+100)/100))*(h-20);
+      if(!started){ ctxFFT.moveTo(x,y); started=true; } else { ctxFFT.lineTo(x,y); }
     }
-    ctxFFT.strokeStyle = '#34d399';
-    ctxFFT.lineWidth = 2; ctxFFT.stroke();
-
-    // Draw peak-hold (purple)
-    if(peakArray){
-      ctxFFT.beginPath(); started = false;
-      for(let i=1; i<N; i++){
-        const f = i * fpb; if(f < 20) continue; if(f > 20000) break;
-        const x = mapLogX(f, w);
-        const db = dbfs(peakArray[i]);
-        const y = 10 + (1 - Math.min(Math.max((db+100)/100, 0), 1))*(h-20);
-        if(!started){ ctxFFT.moveTo(x,y); started = true; } else { ctxFFT.lineTo(x,y); }
-      }
-      ctxFFT.strokeStyle = '#a78bfa';
-      ctxFFT.lineWidth = 1.5; ctxFFT.stroke();
-    }
-    ctxFFT.restore();
+    ctxFFT.strokeStyle='#a78bfa'; ctxFFT.lineWidth=1.5; ctxFFT.stroke();
   }
 
   function drawOctave(){
-    const {width:w, height:h} = ctxOct.canvas;
-    drawBackground(ctxOct);
+    const {width:w, height:h} = ctxOct.canvas; drawBackground(ctxOct); if(!freqArray) return;
+    const N=freqArray.length; const fpb=sampleRate/(2*N);
+
+    const vals = bands.map(b=>{
+      const s=Math.max(0, Math.floor(b.fl/fpb)); const e=Math.min(N-1, Math.ceil(b.fh/fpb));
+      let sum=0, cnt=0; for(let i=s;i<=e;i++){ sum+=freqArray[i]; cnt++; }
+      let v=cnt? (sum/cnt):0; if(aWeightChk.checked){ v*=Math.pow(10, aWeighting(b.fc)/20); } return v;
+    });
+
+    if(!peakOct || peakOct.length!==vals.length) peakOct=new Float32Array(vals.length);
+    if(holdEnabled){ for(let i=0;i<vals.length;i++) peakOct[i]=Math.max(peakOct[i], vals[i]); }
+
+    // current bars (blue)
+    ctxOct.fillStyle='#34d399';
+    for(let i=0;i<vals.length;i++){
+      const b=bands[i]; const xL=mapLogX(b.fl,w); const xR=mapLogX(b.fh,w); const barW=Math.max(2, xR-xL-2);
+      const y=10 + (1 - clamp01((dbfs(vals[i])+100)/100))*(h-20); const hh=(h-20)-(y-10);
+      ctxOct.fillRect(xL+1, y, barW, hh);
+    }
+    // peak-hold ridge (amber) + dots
+    ctxOct.beginPath(); for(let i=0;i<vals.length;i++){ const cx=mapLogX(bands[i].fc,w); const y=10 + (1 - clamp01((dbfs(peakOct[i]||0)+100)/100))*(h-20); if(i===0) ctxOct.moveTo(cx,y); else ctxOct.lineTo(cx,y);} ctxOct.strokeStyle='#facc15'; ctxOct.lineWidth=2; ctxOct.stroke();
+    ctxOct.fillStyle='#facc15'; for(let i=0;i<vals.length;i++){ const cx=mapLogX(bands[i].fc,w); const y=10 + (1 - clamp01((dbfs(peakOct[i]||0)+100)/100))*(h-20); ctxOct.fillRect(cx-2,y-2,4,4); }
+  }
+
+  // ==== Spectrogram ====
+  function drawHeatAxes(){
+    const w=heatAxis.width, h=heatAxis.height, ctx=ctxAxis; ctx.clearRect(0,0,w,h);
+    ctx.strokeStyle='var(--frame)'; ctx.strokeRect(40,10,w-50,h-20);
+    ctx.strokeStyle='var(--grid)'; for(let i=0;i<6;i++){ const y=(h-20)*(i/5)+10; ctx.beginPath(); ctx.moveTo(40,y); ctx.lineTo(w-10,y); ctx.stroke(); }
+    ctx.strokeStyle='var(--grid)'; const fmin=20, fmax=Math.min(sampleRate/2,20000); const ticks=[31.5,63,125,250,500,1000,2000,4000,8000,16000];
+    ticks.forEach(t=>{ const x=40 + (Math.log10(t)-Math.log10(fmin))/(Math.log10(fmax)-Math.log10(fmin))*(w-50); ctx.beginPath(); ctx.moveTo(x,10); ctx.lineTo(x,h-10); ctx.stroke(); });
+    ctx.fillStyle='var(--label)'; ctx.font='12px system-ui'; ticks.forEach(t=>{ const x=40 + (Math.log10(t)-Math.log10(fmin))/(Math.log10(fmax)-Math.log10(fmin))*(w-50); ctx.fillText(t>=1000?(t/1000)+'k':t, x-8, h-4); });
+  }
+
+  function drawHeatmapStep(){
     if(!freqArray) return;
+    const w=heatCanvas.width, h=heatCanvas.height; // พิกเซลของแคนวาส
+    // พื้นที่พล็อตภายในกรอบเดียวกับกราฟอื่น ๆ
+    const x0=40, x1=w-10, y0=10, y1=h-10; const iw=x1-x0, ih=y1-y0;
 
-    const N = freqArray.length;
-    const fpb = sampleRate / (2*N);
+    // เลื่อนภาพขึ้น 1 พิกเซลเฉพาะพื้นที่พล็อต (ปลอดภัยกับ Safari)
+    try{
+      const img = ctxHeat.getImageData(x0, y0+1, iw, ih-1);
+      ctxHeat.putImageData(img, x0, y0);
+    }catch(e){
+      ctxHeat.drawImage(heatCanvas, x0, y0+1, iw, ih-1, x0, y0, iw, ih-1);
+    }
 
-    // Compute per-band avg (linear magnitude), apply optional A-weight
-    const vals = bands.map(b => {
-      const start = Math.max(0, Math.floor(b.fl / fpb));
-      const end = Math.min(N-1, Math.ceil(b.fh / fpb));
-      let sum=0; let count=0;
-      for(let i=start;i<=end;i++){ sum += freqArray[i]; count++; }
-      let v = count? (sum/count) : 0;
-      if(aWeightChk.checked){
-        v = v * Math.pow(10, aWeighting(b.fc)/20);
-      }
-      return {band:b, v};
-    });
+    // วาดแถวใหม่ไว้ด้านล่างของพื้นที่พล็อต
+    const N=freqArray.length; const fpb=sampleRate/(2*N); const fmin=20, fmax=Math.min(sampleRate/2,20000);
+    for(let x=x0; x<x1; x++){
+      const lx=(x-x0)/(iw-1); const f=Math.pow(10, Math.log10(fmin)+lx*(Math.log10(fmax)-Math.log10(fmin)));
+      let i=Math.floor(f/fpb); i=Math.max(0, Math.min(N-1, i));
+      const t=clamp01((dbfs(freqArray[i])+100)/100);
+      const hue=240-240*t; ctxHeat.fillStyle=`hsl(${hue}, 100%, ${35 + 25*t}%)`;
+      ctxHeat.fillRect(x, y1-1, 1, 1);
+    }
 
-    // Draw bars positioned by log edges
-    ctxOct.fillStyle = '#60a5fa';
-    vals.forEach(({band, v}) => {
-      const xL = mapLogX(band.fl, w);
-      const xR = mapLogX(band.fh, w);
-      const barW = Math.max(2, xR - xL - 2);
-      const db = dbfs(v);
-      const y = 10 + (1 - Math.min(Math.max((db+100)/100, 0), 1))*(h-20);
-      const height = (h-20) - (y-10);
-      ctxOct.fillRect(xL+1, y, barW, height);
-    });
-
-    // Labels on selected bands
-    ctxOct.fillStyle = 'rgba(255,255,255,0.7)';
-    ctxOct.font = '12px system-ui';
-    const labelIdx = [0, 6, 12, 18, 22, 26, 30];
-    labelIdx.forEach(i => {
-      if(i < centers.length){
-        const x = mapLogX(centers[i], w);
-        const txt = centers[i] >= 1000 ? (centers[i]/1000)+'k' : centers[i];
-        ctxOct.fillText(txt, x-8, h-4);
-      }
-    });
+    // วาดแกนทับ (ไม่โดนเลื่อนตามภาพ)
+    drawHeatAxes();
   }
 
   function updateRMS(){
-    if(!dataArray) return;
-    let sum = 0;
-    for(let i=0;i<dataArray.length;i++){
-      const v = (dataArray[i]-128)/128;
-      sum += v*v;
-    }
-    const rms = Math.sqrt(sum / dataArray.length);
-    const db = 20*Math.log10(rms + 1e-12);
-    rmsEl.textContent = `${db.toFixed(1)} dBFS`;
+    if(!dataArray) return; let sum=0; for(let i=0;i<dataArray.length;i++){ const v=(dataArray[i]-128)/128; sum+=v*v; }
+    const rms=Math.sqrt(sum/dataArray.length); const db=20*Math.log10(rms+1e-12); rmsEl.textContent=`${db.toFixed(1)} dBFS`;
   }
 
   function loop(){
-    if(!running) return;
-    analyser.getByteTimeDomainData(dataArray);
-    analyser.getByteFrequencyData(freqArray);
-
-    // exponential averaging per bin
-    if(avgChk.checked){
-      if(!avgBuffer || avgBuffer.length !== freqArray.length){
-        avgBuffer = new Float32Array(freqArray.length);
-      }
-      const alpha = 0.5;
-      for(let i=0;i<freqArray.length;i++){
-        avgBuffer[i] = alpha*avgBuffer[i] + (1-alpha)*freqArray[i];
-      }
-      for(let i=0;i<freqArray.length;i++) freqArray[i] = avgBuffer[i];
-    }
-
-    drawFFT();
-    drawOctave();
-    updateRMS();
-
-    rafId = requestAnimationFrame(loop);
+    if(!running) return; analyser.getByteTimeDomainData(dataArray); analyser.getByteFrequencyData(freqArray);
+    if(avgChk.checked){ if(!avgBuffer || avgBuffer.length!==freqArray.length) avgBuffer=new Float32Array(freqArray.length); const alpha=0.5; for(let i=0;i<freqArray.length;i++){ avgBuffer[i]=alpha*avgBuffer[i]+(1-alpha)*freqArray[i]; freqArray[i]=avgBuffer[i]; } }
+    const m=modeSel.value; if(m==='fft') drawFFT(); else if(m==='oct') drawOctave(); else drawHeatmapStep();
+    updateRMS(); rafId=requestAnimationFrame(loop);
   }
 
   async function start(){
     try{
-      btnStart.disabled = true; btnStop.disabled = false;
-
-      const constraints = {
-        audio: {
-          echoCancellation: ec.checked ? false : true,
-          noiseSuppression: ns.checked ? false : true,
-          autoGainControl: agc.checked ? false : true
-        }
-      };
-
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
-      if(audioCtx.state === 'suspended') await audioCtx.resume();
-
-      sampleRate = audioCtx.sampleRate;
-      labelRate.textContent = `${Math.round(sampleRate)} Hz`;
-
-      analyser = audioCtx.createAnalyser();
-      analyser.fftSize = parseInt(fftSel.value, 10);
-      analyser.smoothingTimeConstant = parseFloat(smoothing.value);
-
-      micSrc = audioCtx.createMediaStreamSource(stream);
-      micSrc.connect(analyser);
-
-      dataArray = new Uint8Array(analyser.fftSize);
-      freqArray = new Uint8Array(analyser.frequencyBinCount);
-      peakArray = new Uint8Array(analyser.frequencyBinCount);
-
-      running = true; loop();
-    }catch(err){
-      console.error(err);
-      alert('เปิดไมโครโฟนไม่สำเร็จ: ' + (err.message || err));
-      btnStart.disabled = false; btnStop.disabled = true;
-    }
+      btnStart.disabled=true; btnStop.disabled=false;
+      const constraints={ audio:{ echoCancellation: ec.checked? false:true, noiseSuppression: ns.checked? false:true, autoGainControl: agc.checked? false:true } };
+      const stream=await navigator.mediaDevices.getUserMedia(constraints);
+      audioCtx=new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'}); if(audioCtx.state==='suspended') await audioCtx.resume();
+      sampleRate=audioCtx.sampleRate; labelRate.textContent=`${Math.round(sampleRate)} Hz`;
+      analyser=audioCtx.createAnalyser(); analyser.fftSize=parseInt(fftSel.value,10); analyser.smoothingTimeConstant=parseFloat(smoothing.value);
+      micSrc=audioCtx.createMediaStreamSource(stream); micSrc.connect(analyser);
+      dataArray=new Uint8Array(analyser.fftSize); freqArray=new Uint8Array(analyser.frequencyBinCount); peakArray=new Uint8Array(analyser.frequencyBinCount); peakOct=new Float32Array(centers.length);
+      drawHeatAxes(); running=true; loop();
+    }catch(err){ console.error(err); alert('เปิดไมโครโฟนไม่สำเร็จ: '+(err.message||err)); btnStart.disabled=false; btnStop.disabled=true; }
   }
 
-  function stop(){
-    running = false;
-    if(rafId) cancelAnimationFrame(rafId);
-    try{ if(micSrc) micSrc.disconnect(); }catch(_){ }
-    try{ if(analyser) analyser.disconnect(); }catch(_){ }
-    if(audioCtx){ audioCtx.close(); }
-    btnStart.disabled = false; btnStop.disabled = true;
-  }
+  function stop(){ running=false; if(rafId) cancelAnimationFrame(rafId); try{micSrc&&micSrc.disconnect();}catch{} try{analyser&&analyser.disconnect();}catch{} if(audioCtx){audioCtx.close();} btnStart.disabled=false; btnStop.disabled=true; }
 
-  // UI events
+  function setMode(m){ fftCard.style.display = m==='fft'? '' : 'none'; octCard.style.display = m==='oct'? '' : 'none'; heatCard.style.display = m==='spec'? '' : 'none'; if(m==='spec') drawHeatAxes(); }
+
+  // ==== Events ====
   btnStart.addEventListener('click', start, {passive:true});
   btnStop.addEventListener('click', stop, {passive:true});
-  btnHold.addEventListener('click', () => {
-    holdEnabled = !holdEnabled;
-    btnHold.setAttribute('aria-pressed', String(holdEnabled));
-    btnHold.textContent = holdEnabled ? '📌 Hold Peak: ON' : '📌 Hold Peak: OFF';
-  }, {passive:true});
-  btnClear.addEventListener('click', () => {
-    if(peakArray) peakArray.fill(0);
-  }, {passive:true});
-
-  fftSel.addEventListener('change', () => {
-    if(!analyser) return;
-    analyser.fftSize = parseInt(fftSel.value,10);
-    dataArray = new Uint8Array(analyser.fftSize);
-    freqArray = new Uint8Array(analyser.frequencyBinCount);
-    peakArray = new Uint8Array(analyser.frequencyBinCount);
-  });
-  smoothing.addEventListener('input', () => { if(analyser){ analyser.smoothingTimeConstant = parseFloat(smoothing.value); }});
-  aWeightChk.addEventListener('change', () => {});
-
-  // Stop page scrolling while moving range (iOS)
-  document.querySelectorAll('input[type=range]').forEach(el => {
-    el.addEventListener('touchmove', e => e.stopPropagation(), {passive:true});
-  });
+  btnHold.addEventListener('click', ()=>{ holdEnabled=!holdEnabled; btnHold.setAttribute('aria-pressed', String(holdEnabled)); btnHold.textContent = holdEnabled? '📌 Hold Peak: ON' : '📌 Hold Peak: OFF'; }, {passive:true});
+  btnClear.addEventListener('click', ()=>{ if(peakArray) peakArray.fill(0); if(peakOct) peakOct.fill(0); }, {passive:true});
+  fftSel.addEventListener('change', ()=>{ if(!analyser) return; analyser.fftSize=parseInt(fftSel.value,10); dataArray=new Uint8Array(analyser.fftSize); freqArray=new Uint8Array(analyser.frequencyBinCount); peakArray=new Uint8Array(analyser.frequencyBinCount); peakOct=new Float32Array(centers.length); });
+  smoothing.addEventListener('input', ()=>{ if(analyser) analyser.smoothingTimeConstant=parseFloat(smoothing.value); });
+  aWeightChk.addEventListener('change', ()=>{});
+  modeSel.addEventListener('change', ()=> setMode(modeSel.value)); setMode('fft');
 })();
 </script>
 </body>
