@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <title>Mobile RTA (ยกตัวเลข Hz ขึ้นเล็กน้อย) — FFT + 1/3 Octave (Log)</title>
+  <title>Mobile RTA (จางเส้น Hold Peak) — FFT + 1/3 Octave (Log)</title>
   <style>
     :root{ --bg1:#0b1220; --bg2:#0a1120; --card:#111827; --text:#e5e7eb; --muted:#9ca3af; }
     html,body{margin:0;height:100%;background:radial-gradient(1200px 600px at 70% -10%, #0f1730 10%, var(--bg1) 60%, var(--bg2) 100%);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans Thai",sans-serif}
@@ -27,7 +27,7 @@
     <div class="card">
       <div class="row" style="justify-content:space-between">
         <div>
-          <h2 style="margin:0 0 4px 0">Mobile RTA (ยกตัวเลข Hz ขึ้นเล็กน้อย)</h2>
+          <h2 style="margin:0 0 4px 0">Mobile RTA (จางเส้น Hold Peak)</h2>
           <div class="hint">แกน X = Log (20 Hz → 20 kHz) • Hold Peak ใช้ได้ทั้ง FFT และ 1/3 Octave • ใช้ผ่าน HTTPS</div>
         </div>
         <div class="row">
@@ -87,7 +87,7 @@
 
 <script>
 (() => {
-  // Padding ของกรอบพล็อต (มีช่องว่างล่างไว้สำหรับตัวเลข)
+  // Padding ของกรอบพล็อต (เผื่อพื้นที่ตัวเลขด้านล่าง)
   const PAD = { L: 40, R: 10, T: 10, B: 32 };
 
   // สีกริดแบบจาง
@@ -95,7 +95,7 @@
   const GRID_V = 'rgba(255,255,255,0.035)';
   const FRAME  = 'rgba(255,255,255,0.08)';
   const LABEL  = 'rgba(255,255,255,0.55)';
-  const LABEL_Y = 10; // ← ขยับขึ้นเล็กน้อย: วาดที่ h - 10
+  const LABEL_Y = 10; // ระยะยกตัวเลขจากขอบล่าง
 
   // DOM
   const btnStart = document.getElementById('btnStart');
@@ -176,7 +176,7 @@
     ctx.strokeStyle = FRAME;
     ctx.strokeRect(PAD.L, PAD.T, w-PAD.L-PAD.R, plotH);
 
-    // ป้ายตัวเลข (ยกขึ้นเล็กน้อย)
+    // ป้ายตัวเลข (ใต้กรอบ)
     ctx.fillStyle = LABEL;
     ctx.font = '12px system-ui';
     ctx.textBaseline = 'alphabetic';
@@ -200,6 +200,7 @@
     if(!peakArray || peakArray.length!==N) peakArray=new Uint8Array(N);
     if(holdEnabled) for(let i=0;i<N;i++) peakArray[i] = Math.max(peakArray[i], freqArray[i]);
 
+    // current (เขียว)
     ctxFFT.beginPath(); let started=false;
     for(let i=1;i<N;i++){
       const f=i*fpb; if(f<20) continue; if(f>20000) break;
@@ -209,6 +210,7 @@
     }
     ctxFFT.strokeStyle='#34d399'; ctxFFT.lineWidth=2; ctxFFT.stroke();
 
+    // peak (ม่วง) — จางลง
     ctxFFT.beginPath(); started=false;
     for(let i=1;i<N;i++){
       const f=i*fpb; if(f<20) continue; if(f>20000) break;
@@ -216,7 +218,12 @@
       const y=mapDbToY(dbfs(peakArray[i]||0), h);
       if(!started){ ctxFFT.moveTo(x,y); started=true; } else ctxFFT.lineTo(x,y);
     }
-    ctxFFT.strokeStyle='#a78bfa'; ctxFFT.lineWidth=1.5; ctxFFT.stroke();
+    ctxFFT.save();
+    ctxFFT.globalAlpha = 0.35;             // ความทึบที่ดูสบายตา
+    ctxFFT.strokeStyle = '#a78bfa';
+    ctxFFT.lineWidth = 1.25;               // บางลงเล็กน้อย
+    ctxFFT.stroke();
+    ctxFFT.restore();
   }
 
   function drawOctave(){
@@ -249,19 +256,26 @@
       ctxOct.fillRect(xL+1, y, barW, Math.max(1, hh));
     }
 
-    // เส้นพีค (เหลืองทอง) + จุด
+    // เส้นพีค (เหลือง) — จางลง + บางลง
     ctxOct.beginPath();
     for(let i=0;i<vals.length;i++){
       const cx=mapLogX(bands[i].fc,w);
       const y=mapDbToY(dbfs(peakOct[i]||0), h);
       if(i===0) ctxOct.moveTo(cx,y); else ctxOct.lineTo(cx,y);
     }
-    ctxOct.strokeStyle='#facc15'; ctxOct.lineWidth=2; ctxOct.stroke();
-    ctxOct.fillStyle='#facc15';
+    ctxOct.save();
+    ctxOct.globalAlpha = 0.45;
+    ctxOct.strokeStyle = '#facc15';
+    ctxOct.lineWidth = 1.5;
+    ctxOct.stroke();
+    ctxOct.restore();
+
+    // จุดพีค — เล็กลงและโปร่ง
+    ctxOct.fillStyle = 'rgba(250,204,21,0.35)';
     for(let i=0;i<vals.length;i++){
       const cx=mapLogX(bands[i].fc,w);
       const y=mapDbToY(dbfs(peakOct[i]||0), h);
-      ctxOct.fillRect(cx-2,y-2,4,4);
+      ctxOct.fillRect(cx-1.5, y-1.5, 3, 3);
     }
   }
 
