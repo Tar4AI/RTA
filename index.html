@@ -182,7 +182,7 @@
   function drawBackground(ctx){
     const {width:w, height:h} = ctx.canvas;
     ctx.clearRect(0,0,w,h);
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)'
     ctx.lineWidth = 1;
 
     for(let i=0;i<6;i++){
@@ -197,7 +197,7 @@
       ctx.beginPath(); ctx.moveTo(x,10); ctx.lineTo(x,h-10); ctx.stroke();
     });
 
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
     ctx.strokeRect(40,10,w-50,h-20);
 
     ctx.fillStyle = 'rgba(255,255,255,0.6)';
@@ -327,7 +327,7 @@
     ctx.strokeRect(40,10,w-50,h-20);
 
     // horizontal grid
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)'
     for(let i=0;i<6;i++){
       const y = (h-20) * (i/5) + 10;
       ctx.beginPath(); ctx.moveTo(40,y); ctx.lineTo(w-10,y); ctx.stroke();
@@ -356,10 +356,10 @@
 
     // plot area inside the frame
     const x0 = 40, x1 = w-10; const y0 = 10, y1 = h-10;
-    const iw = x1 - x0; const ih = y1 - y0 - 10; // keep margins similar to other charts
+    const iw = x1 - x0; const ih = y1 - y0; // ความสูงพื้นที่พล็อตจริง (ในกรอบ)
 
     // scroll up 1px within plot area
-    ctxHeat.drawImage(heatCanvas, x0, y0+1, iw, ih-1, x0, y0, iw, ih-1);
+    ctxHeat.drawImage(heatCanvas, x0, y0+1, iw, ih-1, x0, y0, iw, ih-1); // เลื่อนภาพขึ้น 1px
 
     const N = freqArray.length;
     const fpb = sampleRate / (2*N);
@@ -373,7 +373,7 @@
       const db = dbfs(freqArray[i]);
       const t = Math.min(Math.max((db+100)/100, 0), 1);
       const hue = 240 - 240*t; // blue->red
-      ctxHeat.fillStyle = `hsl(${hue}, 100%, ${40 + 20*t}%)`;
+      ctxHeat.fillStyle = `hsl(${hue}, 100%, ${35 + 25*t}%)`; // เพิ่มคอนทราสต์เล็กน้อย
       ctxHeat.fillRect(x, y0+ih-1, 1, 1);
     }
 
