@@ -23,7 +23,6 @@
     .kv{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
     .kv div{background:#0e1628;border:1px solid #1f2937;border-radius:12px;padding:8px}
     .kv b{display:block;color:#cbd5e1;font-size:12px;margin-bottom:4px}
-    /* บังคับเต็มความกว้างเสมอ */
     @media(min-width:720px){.meters{grid-template-columns:1fr}}
   </style>
 </head>
@@ -43,7 +42,14 @@
         </div>
       </div>
       <div class="row" style="margin-top:8px">
-        <label>FFT
+        <label>Mode
+          <select id="mode">
+            <option value="fft" selected>FFT</option>
+            <option value="oct">1/3 Octave</option>
+            <option value="spec">Spectrogram</option>
+          </select>
+        </label>
+        <label> FFT Size
           <select id="fft">
             <option value="2048">2048</option>
             <option value="4096" selected>4096</option>
@@ -67,7 +73,7 @@
 
     <div class="meters">
       <!-- FFT: เต็มแนวนอน -->
-      <div class="card">
+      <div id="fftCard" class="card">
         <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
           <b>RTA แบบละเอียด (FFT, Log Frequency)</b>
           <span class="hint" id="labelRate">—</span>
@@ -76,7 +82,7 @@
       </div>
       
       <!-- 1/3 Octave: เต็มแนวนอน พร้อม Peak Hold ใช้สวิตช์เดียวกัน -->
-      <div class="card">
+      <div id="octCard" class="card" style="display:none">
         <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
           <b>RTA แบบ 1/3 Octave (Log Axis)</b>
           <span class="hint" id="labelOct">20 Hz – 20 kHz</span>
@@ -85,10 +91,10 @@
       </div>
       
       <!-- Heatmap / Spectrogram: เต็มแนวนอน ไม่มี hold peak -->
-      <div class="card">
+      <div id="heatCard" class="card" style="display:none">
         <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
           <b>Spectrogram / Heatmap (Log Frequency)</b>
-          <span class="hint">เลื่อนจอลงมาดูได้ • คอลัมน์ใหม่จะเลื่อนจากขวาไปซ้าย</span>
+          <span class="hint">เวลาไหลจากล่างขึ้นบน • ความถี่แกน X เป็น Log</span>
         </div>
         <canvas id="heatCanvas" width="1200" height="320"></canvas>
       </div>
@@ -110,6 +116,7 @@
   const btnStop = document.getElementById('btnStop');
   const btnHold = document.getElementById('btnHold');
   const btnClear = document.getElementById('btnClear');
+  const modeSel = document.getElementById('mode');
   const fftSel = document.getElementById('fft');
   const smoothing = document.getElementById('smoothing');
   const avgChk = document.getElementById('avg');
@@ -117,6 +124,10 @@
   const ec = document.getElementById('ec');
   const ns = document.getElementById('ns');
   const agc = document.getElementById('agc');
+
+  const fftCard = document.getElementById('fftCard');
+  const octCard = document.getElementById('octCard');
+  const heatCard = document.getElementById('heatCard');
 
   const fftCanvas = document.getElementById('fftCanvas');
   const octCanvas = document.getElementById('octCanvas');
@@ -259,23 +270,44 @@
     if(!peakOct || peakOct.length !== vals.length){ peakOct = new Float32Array(vals.length); }
     if(holdEnabled){ for(let i=0;i<vals.length;i++) peakOct[i] = Math.max(peakOct[i], vals[i]); }
 
-    const drawBars = (arr, fillStyle) => {
-      ctxOct.fillStyle = fillStyle;
-      for(let i=0;i<arr.length;i++){
+    // ค่าปัจจุบัน: แท่งฟ้า
+    for(let i=0;i<vals.length;i++){
+      const b = bands[i];
+      const xL = mapLogX(b.fl, w);
+      const xR = mapLogX(b.fh, w);
+      const barW = Math.max(2, xR - xL - 2);
+      const db = dbfs(vals[i]);
+      const y = 10 + (1 - Math.min(Math.max((db+100)/100, 0), 1))*(h-20);
+      const height = (h-20) - (y-10);
+      ctxOct.fillStyle = '#5ba0ff';
+      ctxOct.fillRect(xL+1, y, barW, height);
+    }
+
+    // Peak Hold: เส้นแนวสันแท่งสีเหลืองทอง + จุด
+    ctxOct.beginPath();
+    for(let i=0;i<vals.length;i++){
+      const b = bands[i];
+      const cx = mapLogX(b.fc, w);
+      const db = dbfs(peakOct ? peakOct[i] : 0);
+      const y = 10 + (1 - Math.min(Math.max((db+100)/100, 0), 1))*(h-20);
+      if(i===0) ctxOct.moveTo(cx, y); else ctxOct.lineTo(cx, y);
+    }
+    ctxOct.strokeStyle = '#facc15';
+    ctxOct.lineWidth = 2;
+    ctxOct.stroke();
+
+    if(peakOct){
+      ctxOct.fillStyle = '#facc15';
+      for(let i=0;i<vals.length;i++){
         const b = bands[i];
-        const xL = mapLogX(b.fl, w);
-        const xR = mapLogX(b.fh, w);
-        const barW = Math.max(2, xR - xL - 2);
-        const db = dbfs(arr[i]);
+        const cx = mapLogX(b.fc, w);
+        const db = dbfs(peakOct[i]);
         const y = 10 + (1 - Math.min(Math.max((db+100)/100, 0), 1))*(h-20);
-        const height = (h-20) - (y-10);
-        ctxOct.fillRect(xL+1, y, barW, height);
+        ctxOct.fillRect(cx-2, y-2, 4, 4);
       }
-    };
+    }
 
-    drawBars(vals, '#60a5fa');
-    if(peakOct){ ctxOct.globalAlpha = 0.9; drawBars(peakOct, '#a78bfa'); ctxOct.globalAlpha = 1; }
-
+    // Labels
     ctxOct.fillStyle = 'rgba(255,255,255,0.7)';
     ctxOct.font = '12px system-ui';
     const labelIdx = [0,6,12,18,22,26,30];
@@ -290,22 +322,24 @@
 
   function drawHeatmapStep(){
     if(!freqArray) return;
-    const {width:w, height:h} = heatCanvas;
-    ctxHeat.drawImage(heatCanvas, 1, 0, w-1, h, 0, 0, w-1, h);
+    const w = heatCanvas.width; const h = heatCanvas.height;
+    // เลื่อนภาพขึ้น 1 พิกเซล (เวลาไหลจากล่าง→บน)
+    ctxHeat.drawImage(heatCanvas, 0, 0, w, h-1, 0, -1, w, h);
 
     const N = freqArray.length;
     const fpb = sampleRate / (2*N);
     const fmin = 20; const fmax = Math.min(sampleRate/2, 20000);
 
-    for(let y=0; y<h; y++){
-      const ratio = 1 - (y/(h-1));
-      const f = Math.pow(10, Math.log10(fmin) + ratio*(Math.log10(fmax)-Math.log10(fmin)));
+    // วาดแถวใหม่ที่ด้านล่าง (y = h-1), X = log-frequency
+    for(let x=0; x<w; x++){
+      const lx = x/(w-1);
+      const f = Math.pow(10, Math.log10(fmin) + lx*(Math.log10(fmax)-Math.log10(fmin)));
       let i = Math.floor(f / fpb); i = Math.max(0, Math.min(N-1, i));
       const db = dbfs(freqArray[i]);
       const t = Math.min(Math.max((db+100)/100, 0), 1);
       const hue = 240 - 240*t; // น้ำเงิน→เขียว→เหลือง→ส้ม→แดง
       ctxHeat.fillStyle = `hsl(${hue}, 100%, ${40 + 20*t}%)`;
-      ctxHeat.fillRect(w-1, y, 1, 1);
+      ctxHeat.fillRect(x, h-1, 1, 1);
     }
   }
 
@@ -337,11 +371,17 @@
       for(let i=0;i<freqArray.length;i++) freqArray[i] = avgBuffer[i];
     }
 
-    drawFFT();
-    drawOctave();
-    drawHeatmapStep();
-    updateRMS();
+    // วาดเฉพาะการ์ดที่กำลังแสดง เพื่อประหยัดแรง
+    const mode = modeSel.value;
+    if(mode==='fft'){
+      drawFFT();
+    }else if(mode==='oct'){
+      drawOctave();
+    }else{
+      drawHeatmapStep();
+    }
 
+    updateRMS();
     rafId = requestAnimationFrame(loop);
   }
 
@@ -416,6 +456,15 @@
   });
   smoothing.addEventListener('input', () => { if(analyser){ analyser.smoothingTimeConstant = parseFloat(smoothing.value); }});
   aWeightChk.addEventListener('change', () => {});
+
+  // โหมดการแสดงผล
+  function setMode(m){
+    fftCard.style.display = m==='fft' ? '' : 'none';
+    octCard.style.display = m==='oct' ? '' : 'none';
+    heatCard.style.display = m==='spec' ? '' : 'none';
+  }
+  modeSel.addEventListener('change', () => setMode(modeSel.value));
+  setMode('fft');
 
   document.querySelectorAll('input[type=range]').forEach(el => {
     el.addEventListener('touchmove', e => e.stopPropagation(), {passive:true});
