@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <title>Mobile RTA (จางเส้น Hold Peak) — FFT + 1/3 Octave (Log)</title>
+  <title>Mobile RTA (เพิ่ม Peak Readout + Hold จาง) — FFT + 1/3 Octave (Log)</title>
   <style>
     :root{ --bg1:#0b1220; --bg2:#0a1120; --card:#111827; --text:#e5e7eb; --muted:#9ca3af; }
     html,body{margin:0;height:100%;background:radial-gradient(1200px 600px at 70% -10%, #0f1730 10%, var(--bg1) 60%, var(--bg2) 100%);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans Thai",sans-serif}
@@ -27,7 +27,7 @@
     <div class="card">
       <div class="row" style="justify-content:space-between">
         <div>
-          <h2 style="margin:0 0 4px 0">Mobile RTA (จางเส้น Hold Peak)</h2>
+          <h2 style="margin:0 0 4px 0">Mobile RTA (เพิ่ม Peak Readout + Hold จาง)</h2>
           <div class="hint">แกน X = Log (20 Hz → 20 kHz) • Hold Peak ใช้ได้ทั้ง FFT และ 1/3 Octave • ใช้ผ่าน HTTPS</div>
         </div>
         <div class="row">
@@ -61,6 +61,7 @@
     </div>
 
     <div class="meters">
+      <!-- FFT -->
       <div class="card">
         <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
           <b>RTA แบบละเอียด (FFT, Log Frequency)</b>
@@ -68,6 +69,7 @@
         </div>
         <canvas id="fftCanvas" width="1200" height="320"></canvas>
       </div>
+      <!-- 1/3 Oct -->
       <div class="card">
         <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
           <b>RTA แบบ 1/3 Octave (Log Axis)</b>
@@ -95,7 +97,7 @@
   const GRID_V = 'rgba(255,255,255,0.035)';
   const FRAME  = 'rgba(255,255,255,0.08)';
   const LABEL  = 'rgba(255,255,255,0.55)';
-  const LABEL_Y = 10; // ระยะยกตัวเลขจากขอบล่าง
+  const LABEL_Y = 10; // ระยะจากขอบล่างสำหรับตัวเลข Hz
 
   // DOM
   const btnStart = document.getElementById('btnStart');
@@ -141,6 +143,7 @@
   const dbfs = v => 20*Math.log10(v/255 + 1e-12);
   const clamp01 = v => Math.min(1, Math.max(0,v));
   function aWeighting(f){ const f2=f*f; const ra=(12200**2*f2**2)/((f2+20.6**2)*(f2+12200**2)*Math.sqrt((f2+107.7**2)*(f2+737.9**2))); return 20*Math.log10(ra)+2.0; }
+  function fmtHz(f){ return f>=1000 ? ((f/1000>=10? (f/1000).toFixed(0):(f/1000).toFixed(1))+' kHz') : (Math.round(f)+' Hz'); }
 
   function mapLogX(f, width){
     const fmin=20, fmax=Math.min(sampleRate/2,20000);
@@ -153,30 +156,66 @@
     return PAD.T + (1 - norm) * plotH;
   }
 
+  // Badge (Peak Readout)
+  function roundRectPath(ctx,x,y,w,h,r){
+    const rr=Math.min(r, w/2, h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+rr,y);
+    ctx.arcTo(x+w,y,x+w,y+h,rr);
+    ctx.arcTo(x+w,y+h,x,y+h,rr);
+    ctx.arcTo(x,y+h,x,y,rr);
+    ctx.arcTo(x,y,x+w,y,rr);
+    ctx.closePath();
+  }
+  function drawPeakBadge(ctx, lines, canvasWidth){
+    const padX=10, padY=6, gap=2, lineH=14;
+    ctx.save();
+    ctx.font='12px system-ui';
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    const textW = Math.max(...lines.map(t=>ctx.measureText(t).width));
+    const boxW = textW + padX*2;
+    const boxH = lineH*lines.length + padY*2 + gap*(lines.length-1);
+    const x = (canvasWidth - boxW)/2;
+    const y = PAD.T + 8;
+
+    // bg
+    roundRectPath(ctx, x, y, boxW, boxH, 8);
+    ctx.fillStyle='rgba(0,0,0,0.45)';
+    ctx.strokeStyle='rgba(255,255,255,0.12)';
+    ctx.lineWidth=1;
+    ctx.fill(); ctx.stroke();
+
+    // text
+    ctx.fillStyle='rgba(229,231,235,0.95)';
+    for(let i=0;i<lines.length;i++){
+      const cy = y + padY + lineH/2 + i*(lineH+gap);
+      ctx.fillText(lines[i], x + boxW/2, cy);
+    }
+    ctx.restore();
+  }
+
+  // Background + grid + axis labels
   function drawBackground(ctx){
     const {width:w, height:h} = ctx.canvas;
     ctx.clearRect(0,0,w,h);
-
     const plotH = h - PAD.T - PAD.B;
 
-    // แนวนอน
     ctx.strokeStyle = GRID_H;
     for(let i=0;i<6;i++){
       const y = PAD.T + (i/5) * plotH;
       ctx.beginPath(); ctx.moveTo(PAD.L,y); ctx.lineTo(w-PAD.R,y); ctx.stroke();
     }
-    // แนวตั้ง
+
     ctx.strokeStyle = GRID_V;
     const ticks=[20,31.5,40,50,63,80,100,125,160,200,250,315,400,500,630,800,1000,2000,4000,8000,16000];
     ticks.forEach(t=>{
       const x=mapLogX(t,w); ctx.beginPath(); ctx.moveTo(x,PAD.T); ctx.lineTo(x, PAD.T+plotH); ctx.stroke();
     });
 
-    // กรอบ
     ctx.strokeStyle = FRAME;
     ctx.strokeRect(PAD.L, PAD.T, w-PAD.L-PAD.R, plotH);
 
-    // ป้ายตัวเลข (ใต้กรอบ)
     ctx.fillStyle = LABEL;
     ctx.font = '12px system-ui';
     ctx.textBaseline = 'alphabetic';
@@ -193,9 +232,12 @@
 
     const N=freqArray.length; const fpb=sampleRate/(2*N);
 
+    // peak (current)
     let peakBin=0, peakVal=-Infinity;
     for(let i=0;i<N;i++){ if(freqArray[i]>peakVal){ peakVal=freqArray[i]; peakBin=i; } }
-    peakEl.textContent = Math.round(peakBin*fpb) + ' Hz';
+    const peakFreqNow = peakBin*fpb;
+    const peakDbNow = dbfs(freqArray[peakBin]);
+    peakEl.textContent = Math.round(peakFreqNow) + ' Hz';
 
     if(!peakArray || peakArray.length!==N) peakArray=new Uint8Array(N);
     if(holdEnabled) for(let i=0;i<N;i++) peakArray[i] = Math.max(peakArray[i], freqArray[i]);
@@ -210,7 +252,7 @@
     }
     ctxFFT.strokeStyle='#34d399'; ctxFFT.lineWidth=2; ctxFFT.stroke();
 
-    // peak (ม่วง) — จางลง
+    // peak-hold (ม่วง จาง)
     ctxFFT.beginPath(); started=false;
     for(let i=1;i<N;i++){
       const f=i*fpb; if(f<20) continue; if(f>20000) break;
@@ -218,12 +260,16 @@
       const y=mapDbToY(dbfs(peakArray[i]||0), h);
       if(!started){ ctxFFT.moveTo(x,y); started=true; } else ctxFFT.lineTo(x,y);
     }
-    ctxFFT.save();
-    ctxFFT.globalAlpha = 0.35;             // ความทึบที่ดูสบายตา
-    ctxFFT.strokeStyle = '#a78bfa';
-    ctxFFT.lineWidth = 1.25;               // บางลงเล็กน้อย
-    ctxFFT.stroke();
-    ctxFFT.restore();
+    ctxFFT.save(); ctxFFT.globalAlpha=0.35; ctxFFT.strokeStyle='#a78bfa'; ctxFFT.lineWidth=1.25; ctxFFT.stroke(); ctxFFT.restore();
+
+    // Hold peak readout (ถ้ามีข้อมูลเกิน 0)
+    let holdBin=0, holdVal=0;
+    for(let i=0;i<N;i++){ if(peakArray[i]>holdVal){ holdVal=peakArray[i]; holdBin=i; } }
+    const lines = [`Peak: ${fmtHz(peakFreqNow)} • ${peakDbNow.toFixed(1)} dBFS`];
+    if(holdVal>0){
+      lines.push(`Hold: ${fmtHz(holdBin*fpb)} • ${dbfs(holdVal).toFixed(1)} dBFS`);
+    }
+    drawPeakBadge(ctxFFT, lines, w);
   }
 
   function drawOctave(){
@@ -233,6 +279,7 @@
 
     const N=freqArray.length; const fpb=sampleRate/(2*N);
 
+    // ค่าปัจจุบันต่อย่าน
     const vals = bands.map(b=>{
       const s=Math.max(0,Math.floor(b.fl/fpb)), e=Math.min(N-1,Math.ceil(b.fh/fpb));
       let sum=0,cnt=0; for(let i=s;i<=e;i++){ sum+=freqArray[i]; cnt++; }
@@ -256,27 +303,33 @@
       ctxOct.fillRect(xL+1, y, barW, Math.max(1, hh));
     }
 
-    // เส้นพีค (เหลือง) — จางลง + บางลง
+    // เส้นพีค (เหลือง จาง)
     ctxOct.beginPath();
     for(let i=0;i<vals.length;i++){
       const cx=mapLogX(bands[i].fc,w);
       const y=mapDbToY(dbfs(peakOct[i]||0), h);
       if(i===0) ctxOct.moveTo(cx,y); else ctxOct.lineTo(cx,y);
     }
-    ctxOct.save();
-    ctxOct.globalAlpha = 0.45;
-    ctxOct.strokeStyle = '#facc15';
-    ctxOct.lineWidth = 1.5;
-    ctxOct.stroke();
-    ctxOct.restore();
-
-    // จุดพีค — เล็กลงและโปร่ง
-    ctxOct.fillStyle = 'rgba(250,204,21,0.35)';
+    ctxOct.save(); ctxOct.globalAlpha=0.45; ctxOct.strokeStyle='#facc15'; ctxOct.lineWidth=1.5; ctxOct.stroke(); ctxOct.restore();
+    ctxOct.fillStyle='rgba(250,204,21,0.35)';
     for(let i=0;i<vals.length;i++){
       const cx=mapLogX(bands[i].fc,w);
       const y=mapDbToY(dbfs(peakOct[i]||0), h);
       ctxOct.fillRect(cx-1.5, y-1.5, 3, 3);
     }
+
+    // Peak readout ของ 1/3 Oct
+    let idxNow=0, vNow=-1;
+    for(let i=0;i<vals.length;i++){ if(vals[i]>vNow){ vNow=vals[i]; idxNow=i; } }
+    let idxHold=0, vHold=0;
+    for(let i=0;i<peakOct.length;i++){ if(peakOct[i]>vHold){ vHold=peakOct[i]; idxHold=i; } }
+    const lines = [
+      `Peak: ${fmtHz(bands[idxNow].fc)} • ${dbfs(vNow).toFixed(1)} dBFS`
+    ];
+    if(vHold>0){
+      lines.push(`Hold: ${fmtHz(bands[idxHold].fc)} • ${dbfs(vHold).toFixed(1)} dBFS`);
+    }
+    drawPeakBadge(ctxOct, lines, w);
   }
 
   function updateRMS(){
