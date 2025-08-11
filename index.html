@@ -340,12 +340,9 @@
     ticks.forEach(t => {
       const x = 40 + (Math.log10(t) - Math.log10(fmin)) / (Math.log10(fmax) - Math.log10(fmin)) * (w-50);
       ctx.beginPath(); ctx.moveTo(x,10); ctx.lineTo(x,h-10); ctx.stroke();
-    });(t => {
-      const x = 40 + (Math.log10(t) - Math.log10(fmin)) / (Math.log10(fmax) - Math.log10(fmin)) * (w-50);
-      ctx.beginPath(); ctx.moveTo(x,10); ctx.lineTo(x,h-10); ctx.stroke();
     });
 
-    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillStyle = 'rgba(255,255,255,0.6)'; = 'rgba(255,255,255,0.6)';
     ctx.font = '12px system-ui';
     const ticks = [31.5,63,125,250,500,1000,2000,4000,8000,16000];
     ticks.forEach(t => {
