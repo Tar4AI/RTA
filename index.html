@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <title>Mobile RTA (กดค้างอ่านความถี่แบบเส้นประ) — FFT + 1/3 Octave (Log)</title>
+  <title>Mobile RTA (กัน select iOS + แตะค้างอ่าน Hz) — FFT + 1/3 Octave (Log)</title>
   <style>
     :root{ --bg1:#0b1220; --bg2:#0a1120; --card:#111827; --text:#e5e7eb; --muted:#9ca3af; }
     html,body{margin:0;height:100%;background:radial-gradient(1200px 600px at 70% -10%, #0f1730 10%, var(--bg1) 60%, var(--bg2) 100%);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans Thai",sans-serif}
@@ -20,10 +20,20 @@
     .kv{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
     .kv div{background:#0e1628;border:1px solid #1f2937;border-radius:12px;padding:8px}
     .kv b{display:block;color:#cbd5e1;font-size:12px;margin-bottom:4px}
-
-    /* ป้ายค่าต่าง ๆ ที่อยู่นอกกราฟ */
+    /* ป้าย peak/hold และป้าย guide Hz (อยู่นอกกราฟ) */
     .badges{display:flex;justify-content:flex-end;gap:6px;margin:4px 0 6px 0}
     .badge{padding:4px 8px;border-radius:999px;background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.12);font-size:12px;color:#e5e7eb}
+
+    /* ปิด iOS selection / callout และ gesture บนกราฟ */
+    canvas, .card canvas{
+      -webkit-user-select: none; user-select: none;
+      -webkit-touch-callout: none;
+      touch-action: none;
+      -ms-touch-action: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    /* ให้คอนโทรลยังเลือก/โฟกัสได้ */
+    button, input, select, label{ -webkit-user-select:auto; user-select:auto; }
   </style>
 </head>
 <body>
@@ -31,8 +41,8 @@
     <div class="card">
       <div class="row" style="justify-content:space-between">
         <div>
-          <h2 style="margin:0 0 4px 0">Mobile RTA (กดค้างอ่านความถี่แบบเส้นประ)</h2>
-          <div class="hint">แกน X = Log (20 Hz → 20 kHz) • Hold Peak ใช้ได้ทั้ง FFT และ 1/3 Octave • แตะค้างบนกราฟเพื่ออ่าน Hz แบบเส้นประ</div>
+          <h2 style="margin:0 0 4px 0">Mobile RTA (กัน select iOS + แตะค้างอ่าน Hz)</h2>
+          <div class="hint">แกน X = Log (20 Hz → 20 kHz) • Hold Peak ใช้ได้ทั้ง FFT และ 1/3 Octave • แตะค้างเพื่ออ่าน Hz • ใช้ผ่าน HTTPS</div>
         </div>
         <div class="row">
           <button id="btnStart">▶️ เริ่มวัด</button>
@@ -74,11 +84,12 @@
         <div class="badges">
           <span class="badge" id="fftPeakText">Peak: —</span>
           <span class="badge" id="fftHoldText" style="display:none;">Hold: —</span>
-          <span class="badge" id="fftCursorText" style="display:none;">Cursor: —</span>
+          <span class="badge" id="fftGuideText" style="display:none;">Cursor: —</span>
         </div>
         <canvas id="fftCanvas" width="1200" height="320"></canvas>
       </div>
-      <!-- 1/3 Oct -->
+
+      <!-- 1/3 Octave -->
       <div class="card">
         <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:2px">
           <b>RTA แบบ 1/3 Octave (Log Axis)</b>
@@ -87,7 +98,7 @@
         <div class="badges">
           <span class="badge" id="octPeakText">Peak: —</span>
           <span class="badge" id="octHoldText" style="display:none;">Hold: —</span>
-          <span class="badge" id="octCursorText" style="display:none;">Cursor: —</span>
+          <span class="badge" id="octGuideText" style="display:none;">Cursor: —</span>
         </div>
         <canvas id="octCanvas" width="1200" height="320"></canvas>
       </div>
@@ -103,22 +114,22 @@
 
 <script>
 (() => {
-  // ==== ระยะขอบ plot (ขยายด้านล่างให้เลข Hz ไม่ทับเส้น) ====
+  // พื้นที่เว้นรอบ Plot (เพิ่ม B เพื่อให้เลข Hz ไม่โดนเส้นทับ)
   const PAD = { L: 40, R: 10, T: 10, B: 32 };
 
-  // ==== สีกริดแบบจาง ====
+  // สีกริดแบบจาง
   const GRID_H = 'rgba(255,255,255,0.06)';
   const GRID_V = 'rgba(255,255,255,0.035)';
   const FRAME  = 'rgba(255,255,255,0.08)';
   const LABEL  = 'rgba(255,255,255,0.55)';
   const LABEL_Y = 10;
 
-  // สีเส้นแนวตั้ง
-  const PEAK_LINE  = 'rgba(96,165,250,0.6)';    // peak ปัจจุบัน
-  const HOLD_LINE  = 'rgba(250,204,21,0.55)';   // peak-hold
-  const CUR_LINE   = 'rgba(255,255,255,0.55)';  // เส้นประ (กดค้างอ่านความถี่)
+  // สีเส้นต่าง ๆ
+  const PEAK_LINE  = 'rgba(96,165,250,0.6)';   // peak ปัจจุบัน (ฟ้าโปร่ง)
+  const HOLD_LINE  = 'rgba(250,204,21,0.55)';  // peak hold (เหลืองโปร่ง)
+  const GUIDE_LINE = 'rgba(148,163,184,0.75)'; // เส้นประตอนแตะค้าง
 
-  // ==== DOM ====
+  // DOM
   const btnStart = document.getElementById('btnStart');
   const btnStop  = document.getElementById('btnStop');
   const btnHold  = document.getElementById('btnHold');
@@ -133,10 +144,10 @@
 
   const fftPeakText = document.getElementById('fftPeakText');
   const fftHoldText = document.getElementById('fftHoldText');
-  const fftCursorText = document.getElementById('fftCursorText');
+  const fftGuideText= document.getElementById('fftGuideText');
   const octPeakText = document.getElementById('octPeakText');
   const octHoldText = document.getElementById('octHoldText');
-  const octCursorText = document.getElementById('octCursorText');
+  const octGuideText= document.getElementById('octGuideText');
 
   const fftCanvas = document.getElementById('fftCanvas');
   const octCanvas = document.getElementById('octCanvas');
@@ -148,7 +159,7 @@
   const rmsEl = document.getElementById('rms');
   const peakEl= document.getElementById('peak');
 
-  // ==== Audio state ====
+  // Audio state
   let audioCtx, analyser, micSrc, rafId;
   let dataArray, freqArray;
   let sampleRate = 48000;
@@ -160,16 +171,16 @@
   let peakArray = null; // FFT
   let peakOct   = null; // 1/3 octave
 
-  // เส้นประอ่านความถี่ (ขณะกดค้าง)
-  let cursorFreqFFT = null;
-  let cursorFreqOct = null;
+  // เส้น “แตะค้างอ่าน Hz”
+  let guideActiveFFT = false, guideXFFT = 0;
+  let guideActiveOct = false, guideXOct = 0;
 
   // 1/3 octave bands
   const centers = [20,25,31.5,40,50,63,80,100,125,160,200,250,315,400,500,630,800,1000,1250,1600,2000,2500,3150,4000,5000,6300,8000,10000,12500,16000,20000];
   const bands   = centers.map(c => ({ fc:c, fl:c/Math.pow(2,1/6), fh:c*Math.pow(2,1/6) }));
   labelOct.textContent = `${centers[0]} Hz – ${centers[centers.length-1]} Hz`;
 
-  // ==== Helpers ====
+  // Helpers
   const dbfs = v => 20*Math.log10(v/255 + 1e-12);
   const clamp01 = v => Math.min(1, Math.max(0,v));
   function aWeighting(f){ const f2=f*f; const ra=(12200**2*f2**2)/((f2+20.6**2)*(f2+12200**2)*Math.sqrt((f2+107.7**2)*(f2+737.9**2))); return 20*Math.log10(ra)+2.0; }
@@ -180,11 +191,11 @@
     const t=(Math.log10(Math.max(f,fmin))-Math.log10(fmin))/(Math.log10(fmax)-Math.log10(fmin));
     return PAD.L + t * (width - PAD.L - PAD.R);
   }
-  function invMapLogX(x, width){
+  function xToFreq(x, width){
     const fmin=20, fmax=Math.min(sampleRate/2,20000);
-    const t = clamp01((x - PAD.L) / (width - PAD.L - PAD.R));
-    const lf = Math.log10(fmin) + t*(Math.log10(fmax)-Math.log10(fmin));
-    return Math.pow(10, lf);
+    const t = (x - PAD.L) / (width - PAD.L - PAD.R);
+    const lx = Math.log10(fmin) + clamp01(t) * (Math.log10(fmax) - Math.log10(fmin));
+    return Math.pow(10, lx);
   }
   function mapDbToY(db, height){
     const norm = clamp01((db + 100) / 100);
@@ -192,7 +203,7 @@
     return PAD.T + (1 - norm) * plotH;
   }
 
-  // ==== Background / grid ====
+  // พื้นหลัง + กริด + เลเบล
   function drawBackground(ctx){
     const {width:w, height:h} = ctx.canvas;
     ctx.clearRect(0,0,w,h);
@@ -222,8 +233,7 @@
     });
   }
 
-  // เส้นแนวตั้งแบบกำกับสี/เส้นประ
-  function drawVLine(ctx, x, h, color, dashed=false){
+  function drawPeakLine(ctx, x, h, color, dashed=false){
     const y0 = PAD.T, y1 = h - PAD.B;
     ctx.save();
     ctx.strokeStyle = color;
@@ -233,7 +243,6 @@
     ctx.restore();
   }
 
-  // ==== Drawing ====
   function drawFFT(){
     const {width:w,height:h} = ctxFFT.canvas;
     drawBackground(ctxFFT);
@@ -272,27 +281,32 @@
     ctxFFT.save(); ctxFFT.globalAlpha=0.35; ctxFFT.strokeStyle='#a78bfa'; ctxFFT.lineWidth=1.25; ctxFFT.stroke(); ctxFFT.restore();
 
     // เส้นตั้งตำแหน่งพีค (ปัจจุบัน + hold)
-    drawVLine(ctxFFT, mapLogX(peakFreqNow, w), h, PEAK_LINE, false);
+    const xPeakNow = mapLogX(peakFreqNow, w);
+    drawPeakLine(ctxFFT, xPeakNow, h, PEAK_LINE, false);
     let holdBin=0, holdVal=0;
     for(let i=0;i<N;i++){ if(peakArray[i]>holdVal){ holdVal=peakArray[i]; holdBin=i; } }
-    if(holdVal>0) drawVLine(ctxFFT, mapLogX(holdBin*fpb, w), h, HOLD_LINE, true);
-
-    // เส้นประ “กดค้างอ่านความถี่”
-    if(cursorFreqFFT!=null){
-      drawVLine(ctxFFT, mapLogX(cursorFreqFFT, w), h, CUR_LINE, true);
-      fftCursorText.style.display = '';
-      fftCursorText.textContent = `Cursor: ${fmtHz(cursorFreqFFT)}`;
-    }else{
-      fftCursorText.style.display = 'none';
+    if(holdVal>0){
+      const xHold = mapLogX(holdBin*fpb, w);
+      drawPeakLine(ctxFFT, xHold, h, HOLD_LINE, true);
     }
 
-    // ป้ายด้านนอกกราฟ
+    // ป้าย
     fftPeakText.textContent = `Peak: ${fmtHz(peakFreqNow)} • ${peakDbNow.toFixed(1)} dBFS`;
     if(holdVal>0){
       fftHoldText.style.display='';
       fftHoldText.textContent = `Hold: ${fmtHz(holdBin*fpb)} • ${dbfs(holdVal).toFixed(1)} dBFS`;
     }else{
       fftHoldText.style.display='none';
+    }
+
+    // เส้นประอ่าน Hz (แตะค้าง)
+    if(guideActiveFFT){
+      drawPeakLine(ctxFFT, guideXFFT, h, GUIDE_LINE, true);
+      const f = xToFreq(guideXFFT, w);
+      fftGuideText.style.display='';
+      fftGuideText.textContent = `Cursor: ${fmtHz(f)}`;
+    }else{
+      fftGuideText.style.display='none';
     }
   }
 
@@ -326,7 +340,7 @@
       ctxOct.fillRect(xL+1, y, barW, Math.max(1, hh));
     }
 
-    // เส้นพีค (เหลือง จาง)
+    // เส้นพีค hold (เหลือง จาง)
     ctxOct.beginPath();
     for(let i=0;i<vals.length;i++){
       const cx=mapLogX(bands[i].fc,w);
@@ -334,32 +348,43 @@
       if(i===0) ctxOct.moveTo(cx,y); else ctxOct.lineTo(cx,y);
     }
     ctxOct.save(); ctxOct.globalAlpha=0.45; ctxOct.strokeStyle='#facc15'; ctxOct.lineWidth=1.5; ctxOct.stroke(); ctxOct.restore();
+    ctxOct.fillStyle='rgba(250,204,21,0.35)';
+    for(let i=0;i<vals.length;i++){
+      const cx=mapLogX(bands[i].fc,w);
+      const y=mapDbToY(dbfs(peakOct[i]||0), h);
+      ctxOct.fillRect(cx-1.5, y-1.5, 3, 3);
+    }
 
-    // หาตำแหน่งพีคของย่าน (ปัจจุบัน + hold)
+    // เส้นตั้งตำแหน่งพีค (ปัจจุบัน + hold)
     let idxNow=0, vNow=-1;
     for(let i=0;i<vals.length;i++){ if(vals[i]>vNow){ vNow=vals[i]; idxNow=i; } }
-    drawVLine(ctxOct, mapLogX(bands[idxNow].fc, w), h, PEAK_LINE, false);
+    const xPeakNow = mapLogX(bands[idxNow].fc, w);
+    drawPeakLine(ctxOct, xPeakNow, h, PEAK_LINE, false);
 
     let idxHold=0, vHold=0;
     for(let i=0;i<peakOct.length;i++){ if(peakOct[i]>vHold){ vHold=peakOct[i]; idxHold=i; } }
-    if(vHold>0) drawVLine(ctxOct, mapLogX(bands[idxHold].fc, w), h, HOLD_LINE, true);
-
-    // เส้นประ “กดค้างอ่านความถี่”
-    if(cursorFreqOct!=null){
-      drawVLine(ctxOct, mapLogX(cursorFreqOct, w), h, CUR_LINE, true);
-      octCursorText.style.display='';
-      octCursorText.textContent=`Cursor: ${fmtHz(cursorFreqOct)}`;
-    }else{
-      octCursorText.style.display='none';
+    if(vHold>0){
+      const xHold = mapLogX(bands[idxHold].fc, w);
+      drawPeakLine(ctxOct, xHold, h, HOLD_LINE, true);
     }
 
-    // ป้ายด้านนอกกราฟ
+    // ป้าย
     octPeakText.textContent = `Peak: ${fmtHz(bands[idxNow].fc)} • ${dbfs(vNow).toFixed(1)} dBFS`;
     if(vHold>0){
       octHoldText.style.display='';
       octHoldText.textContent = `Hold: ${fmtHz(bands[idxHold].fc)} • ${dbfs(vHold).toFixed(1)} dBFS`;
     }else{
       octHoldText.style.display='none';
+    }
+
+    // เส้นประอ่าน Hz (แตะค้าง)
+    if(guideActiveOct){
+      drawPeakLine(ctxOct, guideXOct, h, GUIDE_LINE, true);
+      const f = xToFreq(guideXOct, w);
+      octGuideText.style.display='';
+      octGuideText.textContent = `Cursor: ${fmtHz(f)}`;
+    }else{
+      octGuideText.style.display='none';
     }
   }
 
@@ -385,26 +410,18 @@
       }
     }
 
-    drawFFT(); 
-    drawOctave(); 
-    updateRMS();
+    drawFFT(); drawOctave(); updateRMS();
     rafId=requestAnimationFrame(loop);
   }
 
-  // ==== Start/Stop ====
   async function start(){
     try{
       btnStart.disabled=true; btnStop.disabled=false;
-
-      // iOS/Safari บางทีจะไม่ยอมถ้าไม่ได้ระบุตรง ๆ
-      const constraints = {
-        audio: {
-          echoCancellation:  ec.checked ? false : true,
-          noiseSuppression:  ns.checked ? false : true,
-          autoGainControl:   agc.checked ? false : true
-        }
-      };
-
+      const constraints={ audio:{
+        echoCancellation: ec.checked? false:true,
+        noiseSuppression: ns.checked? false:true,
+        autoGainControl:  agc.checked? false:true
+      }};
       const stream=await navigator.mediaDevices.getUserMedia(constraints);
       audioCtx=new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
       if(audioCtx.state==='suspended') await audioCtx.resume();
@@ -432,13 +449,39 @@
   }
   function stop(){
     running=false; if(rafId) cancelAnimationFrame(rafId);
-    try{micSrc&&micSrc.disconnect();}catch{} 
-    try{analyser&&analyser.disconnect();}catch{}
+    try{micSrc&&micSrc.disconnect();}catch{} try{analyser&&analyser.disconnect();}catch{}
     if(audioCtx){audioCtx.close();}
     btnStart.disabled=false; btnStop.disabled=true;
   }
 
-  // ==== Events ====
+  // === แตะค้างเพื่ออ่าน Hz: handlers + กัน long-press selection iOS ===
+  function attachGuideHandlers(canvas, which){
+    const setPos = (clientX) => {
+      const rect = canvas.getBoundingClientRect();
+      const localX = Math.max(PAD.L, Math.min(canvas.width - PAD.R, (clientX - rect.left) * (canvas.width/rect.width)));
+      if(which==='fft'){ guideXFFT = localX; guideActiveFFT = true; }
+      else{ guideXOct = localX; guideActiveOct = true; }
+    };
+    // pointer events
+    canvas.addEventListener('pointerdown', e => { e.preventDefault(); setPos(e.clientX); }, {passive:false});
+    canvas.addEventListener('pointermove', e => { if(e.pressure>0){ e.preventDefault(); setPos(e.clientX);} }, {passive:false});
+    ['pointerup','pointercancel','pointerleave'].forEach(ev=>{
+      canvas.addEventListener(ev, e => {
+        if(which==='fft') guideActiveFFT = false; else guideActiveOct = false;
+      }, {passive:true});
+    });
+
+    // กัน contextmenu / long-press callout
+    canvas.addEventListener('contextmenu', e=>e.preventDefault());
+    // เผื่อบางเครื่องไม่รองรับ pointer events เต็ม ๆ
+    canvas.addEventListener('touchstart', e=>{ e.preventDefault(); setPos(e.touches[0].clientX); }, {passive:false});
+    canvas.addEventListener('touchmove',  e=>{ e.preventDefault(); setPos(e.touches[0].clientX); }, {passive:false});
+    canvas.addEventListener('touchend',   e=>{ if(which==='fft') guideActiveFFT=false; else guideActiveOct=false; }, {passive:true});
+  }
+  attachGuideHandlers(fftCanvas, 'fft');
+  attachGuideHandlers(octCanvas, 'oct');
+
+  // UI events
   btnStart.addEventListener('click', start, {passive:true});
   btnStop .addEventListener('click', stop , {passive:true});
   btnHold .addEventListener('click', ()=>{
@@ -464,40 +507,6 @@
   document.querySelectorAll('input[type=range]').forEach(el=>{
     el.addEventListener('touchmove', e=>e.stopPropagation(), {passive:true});
   });
-
-  // ==== กดค้างอ่านความถี่: เส้นประแนวตั้ง ====
-  function addCursorHandler(canvas, setFreq, badgeEl){
-    let holding = false;
-
-    function updateFromEvent(ev){
-      const rect = canvas.getBoundingClientRect();
-      const scaleX = canvas.width / rect.width; // map CSS → canvas px
-      const xCanvas = (ev.clientX - rect.left) * scaleX;
-      const f = invMapLogX(xCanvas, canvas.width);
-      setFreq(f);
-    }
-
-    canvas.addEventListener('pointerdown', (ev)=>{
-      holding = true; canvas.setPointerCapture(ev.pointerId);
-      ev.preventDefault(); updateFromEvent(ev);
-    }, {passive:false});
-
-    canvas.addEventListener('pointermove', (ev)=>{
-      if(!holding) return;
-      ev.preventDefault(); updateFromEvent(ev);
-    }, {passive:false});
-
-    function end(){
-      holding = false; setFreq(null);
-      if(badgeEl) badgeEl.style.display='none';
-    }
-    canvas.addEventListener('pointerup', end, {passive:true});
-    canvas.addEventListener('pointercancel', end, {passive:true});
-    canvas.addEventListener('pointerleave', ()=>{ if(!holding){ setFreq(null); if(badgeEl) badgeEl.style.display='none'; }}, {passive:true});
-  }
-
-  addCursorHandler(fftCanvas,  f=>{ cursorFreqFFT = f; }, fftCursorText);
-  addCursorHandler(octCanvas,  f=>{ cursorFreqOct = f; }, octCursorText);
 })();
 </script>
 </body>
