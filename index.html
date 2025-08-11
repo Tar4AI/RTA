@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <title>Mobile RTA (เพิ่มเส้นตั้ง + แตะค้างเพื่อ Pin) — FFT + 1/3 Octave (Log)</title>
+  <title>Mobile RTA (เพิ่มเส้นตั้งตำแหน่งพีค) — FFT + 1/3 Octave (Log)</title>
   <style>
     :root{ --bg1:#0b1220; --bg2:#0a1120; --card:#111827; --text:#e5e7eb; --muted:#9ca3af; }
     html,body{margin:0;height:100%;background:radial-gradient(1200px 600px at 70% -10%, #0f1730 10%, var(--bg1) 60%, var(--bg2) 100%);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans Thai",sans-serif}
@@ -20,11 +20,9 @@
     .kv{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
     .kv div{background:#0e1628;border:1px solid #1f2937;border-radius:12px;padding:8px}
     .kv b{display:block;color:#cbd5e1;font-size:12px;margin-bottom:4px}
-
     /* ป้าย peak/hold นอกกราฟ */
     .badges{display:flex;justify-content:flex-end;gap:6px;margin:4px 0 6px 0}
     .badge{padding:4px 8px;border-radius:999px;background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.12);font-size:12px;color:#e5e7eb}
-    .badge.pinned{background:rgba(250,204,21,.12);border-color:rgba(250,204,21,.35)}
   </style>
 </head>
 <body>
@@ -32,8 +30,8 @@
     <div class="card">
       <div class="row" style="justify-content:space-between">
         <div>
-          <h2 style="margin:0 0 4px 0">Mobile RTA (เพิ่มเส้นตั้ง + Pin ด้วยการแตะค้าง)</h2>
-          <div class="hint">แกน X = Log (20 Hz → 20 kHz) • Hold Peak + แตะค้างเพื่อ Pin badge (กด Clear Peak เพื่อยกเลิก)</div>
+          <h2 style="margin:0 0 4px 0">Mobile RTA (เพิ่มเส้นตั้งตำแหน่งพีค)</h2>
+          <div class="hint">แกน X = Log (20 Hz → 20 kHz) • Hold Peak ใช้ได้ทั้ง FFT และ 1/3 Octave • ใช้ผ่าน HTTPS</div>
         </div>
         <div class="row">
           <button id="btnStart">▶️ เริ่มวัด</button>
@@ -102,7 +100,7 @@
 
 <script>
 (() => {
-  // พื้นที่เว้นรอบ Plot (เพิ่ม B ให้ตัวเลขแกนล่างชัด)
+  // พื้นที่เว้นรอบ Plot (เพิ่ม B เพื่อไม่ให้เลข Hz โดนทับ)
   const PAD = { L: 40, R: 10, T: 10, B: 32 };
 
   // สีกริดแบบจาง
@@ -112,12 +110,9 @@
   const LABEL  = 'rgba(255,255,255,0.55)';
   const LABEL_Y = 10;
 
-  // สีเส้นตั้งตำแหน่งพีค
+  // สี “เส้นตั้งบอกพีค”
   const PEAK_LINE  = 'rgba(96,165,250,0.6)';   // ฟ้าโปร่ง ๆ (ปัจจุบัน)
   const HOLD_LINE  = 'rgba(250,204,21,0.55)';  // เหลืองโปร่ง (Hold)
-
-  // แตะค้างกี่มิลลิวินาทีถึงจะ Pin
-  const LONG_MS = 500;
 
   // DOM
   const btnStart = document.getElementById('btnStart');
@@ -158,17 +153,6 @@
   let holdEnabled = false;
   let peakArray = null; // FFT
   let peakOct   = null; // 1/3 octave
-
-  // “ค่าพีคล่าสุด” ที่คำนวณได้ในรอบล่าสุด (ไว้ให้ Pin)
-  let lastPeakFFT = { freq: 0, db: -Infinity };
-  let lastPeakOCT = { freq: 0, db: -Infinity };
-
-  // สถานะ Pin (null = ไม่ pin)
-  let pinnedFFT = null; // {freq, db}
-  let pinnedOCT = null; // {freq, db}
-
-  // Long-press timers
-  let lpFFT = null, lpOCT = null;
 
   // 1/3 octave bands
   const centers = [20,25,31.5,40,50,63,80,100,125,160,200,250,315,400,500,630,800,1000,1250,1600,2000,2500,3150,4000,5000,6300,8000,10000,12500,16000,20000];
@@ -245,7 +229,6 @@
     for(let i=0;i<N;i++){ if(freqArray[i]>peakVal){ peakVal=freqArray[i]; peakBin=i; } }
     const peakFreqNow = peakBin*fpb;
     const peakDbNow = dbfs(freqArray[peakBin]);
-    lastPeakFFT = { freq: peakFreqNow, db: peakDbNow };
     peakEl.textContent = Math.round(peakFreqNow) + ' Hz';
 
     if(!peakArray || peakArray.length!==N) peakArray=new Uint8Array(N);
@@ -271,11 +254,9 @@
     }
     ctxFFT.save(); ctxFFT.globalAlpha=0.35; ctxFFT.strokeStyle='#a78bfa'; ctxFFT.lineWidth=1.25; ctxFFT.stroke(); ctxFFT.restore();
 
-    // เส้นตั้ง: ใช้พีคปัจจุบันหรือพีคที่ pin ไว้
-    const xPeakNow = mapLogX((pinnedFFT? pinnedFFT.freq : peakFreqNow), w);
+    // เส้นตั้งตำแหน่งพีค (ปัจจุบัน + hold)
+    const xPeakNow = mapLogX(peakFreqNow, w);
     drawPeakLine(ctxFFT, xPeakNow, h, PEAK_LINE, false);
-
-    // hold line
     let holdBin=0, holdVal=0;
     for(let i=0;i<N;i++){ if(peakArray[i]>holdVal){ holdVal=peakArray[i]; holdBin=i; } }
     if(holdVal>0){
@@ -284,13 +265,7 @@
     }
 
     // ป้ายด้านนอกกราฟ
-    if(pinnedFFT){
-      fftPeakText.classList.add('pinned');
-      fftPeakText.textContent = `📌 Pinned: ${fmtHz(pinnedFFT.freq)} • ${pinnedFFT.db.toFixed(1)} dBFS`;
-    }else{
-      fftPeakText.classList.remove('pinned');
-      fftPeakText.textContent = `Peak: ${fmtHz(peakFreqNow)} • ${peakDbNow.toFixed(1)} dBFS`;
-    }
+    fftPeakText.textContent = `Peak: ${fmtHz(peakFreqNow)} • ${peakDbNow.toFixed(1)} dBFS`;
     if(holdVal>0){
       fftHoldText.style.display='';
       fftHoldText.textContent = `Hold: ${fmtHz(holdBin*fpb)} • ${dbfs(holdVal).toFixed(1)} dBFS`;
@@ -344,16 +319,12 @@
       ctxOct.fillRect(cx-1.5, y-1.5, 3, 3);
     }
 
-    // หาพีคของย่าน
+    // หาตำแหน่งพีคของย่าน (ปัจจุบัน + hold)
     let idxNow=0, vNow=-1;
     for(let i=0;i<vals.length;i++){ if(vals[i]>vNow){ vNow=vals[i]; idxNow=i; } }
-    lastPeakOCT = { freq: bands[idxNow].fc, db: dbfs(vNow) };
-
-    // เส้นตั้ง: ใช้พีคปัจจุบันหรือที่ pin
-    const xPeakNow = mapLogX((pinnedOCT? pinnedOCT.freq : bands[idxNow].fc), w);
+    const xPeakNow = mapLogX(bands[idxNow].fc, w);
     drawPeakLine(ctxOct, xPeakNow, h, PEAK_LINE, false);
 
-    // hold line
     let idxHold=0, vHold=0;
     for(let i=0;i<peakOct.length;i++){ if(peakOct[i]>vHold){ vHold=peakOct[i]; idxHold=i; } }
     if(vHold>0){
@@ -362,13 +333,7 @@
     }
 
     // ป้ายด้านนอกกราฟ
-    if(pinnedOCT){
-      octPeakText.classList.add('pinned');
-      octPeakText.textContent = `📌 Pinned: ${fmtHz(pinnedOCT.freq)} • ${pinnedOCT.db.toFixed(1)} dBFS`;
-    }else{
-      octPeakText.classList.remove('pinned');
-      octPeakText.textContent = `Peak: ${fmtHz(bands[idxNow].fc)} • ${dbfs(vNow).toFixed(1)} dBFS`;
-    }
+    octPeakText.textContent = `Peak: ${fmtHz(bands[idxNow].fc)} • ${dbfs(vNow).toFixed(1)} dBFS`;
     if(vHold>0){
       octHoldText.style.display='';
       octHoldText.textContent = `Hold: ${fmtHz(bands[idxHold].fc)} • ${dbfs(vHold).toFixed(1)} dBFS`;
@@ -439,25 +404,6 @@
     btnStart.disabled=false; btnStop.disabled=true;
   }
 
-  // ==== แตะค้างเพื่อ Pin ====
-  function setupLongPress(canvas, onPin){
-    let timer=null;
-    canvas.addEventListener('pointerdown', ()=>{
-      if(timer) clearTimeout(timer);
-      timer=setTimeout(()=>{ onPin(); timer=null; }, LONG_MS);
-    }, {passive:true});
-    ['pointerup','pointercancel','pointerleave'].forEach(ev=>{
-      canvas.addEventListener(ev, ()=>{ if(timer){ clearTimeout(timer); timer=null; } }, {passive:true});
-    });
-  }
-  setupLongPress(fftCanvas, ()=>{
-    pinnedFFT = { ...lastPeakFFT };
-  });
-  setupLongPress(octCanvas, ()=>{
-    pinnedOCT = { ...lastPeakOCT };
-  });
-
-  // ====== Events ======
   btnStart.addEventListener('click', start, {passive:true});
   btnStop .addEventListener('click', stop , {passive:true});
   btnHold .addEventListener('click', ()=>{
@@ -468,9 +414,6 @@
   btnClear.addEventListener('click', ()=>{
     if(peakArray) peakArray.fill(0);
     if(peakOct)   peakOct.fill(0);
-    pinnedFFT=null; pinnedOCT=null;                 // ยกเลิก Pin ด้วย
-    fftPeakText.classList.remove('pinned');
-    octPeakText.classList.remove('pinned');
   }, {passive:true});
   fftSel.addEventListener('change', ()=>{
     if(!analyser) return;
