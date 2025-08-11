@@ -324,7 +324,8 @@
     if(!freqArray) return;
     const w = heatCanvas.width; const h = heatCanvas.height;
     // เลื่อนภาพขึ้น 1 พิกเซล (เวลาไหลจากล่าง→บน)
-    ctxHeat.drawImage(heatCanvas, 0, 0, w, h-1, 0, -1, w, h);
+    // เลื่อนภาพขึ้น 1 พิกเซล: ก็อปรอว์ 1..h-1 ไปไว้ 0..h-2 (ไม่ใช้ dest ติดลบ เพื่อไม่ให้ browser บางเจ้า glitch)
+    ctxHeat.drawImage(heatCanvas, 0, 1, w, h-1, 0, 0, w, h-1);
 
     const N = freqArray.length;
     const fpb = sampleRate / (2*N);
