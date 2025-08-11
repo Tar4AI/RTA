@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>Mobile RTA (Mic)</title>
+  <style>
+    :root{
+      --bg1:#0b1220; --bg2:#0a1120; --card:#111827; --text:#e5e7eb; --muted:#9ca3af; --accent:#34d399; --accent2:#60a5fa;
+    }
+    html,body{margin:0;height:100%;background:radial-gradient(1200px 600px at 70% -10%, #0f1730 10%, var(--bg1) 60%, var(--bg2) 100%);color:var(--text);font-family:system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans Thai", sans-serif}
+    .wrap{display:flex;flex-direction:column;gap:12px;max-width:920px;margin:0 auto;padding:12px}
+    .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+    .card{background:var(--card);border:1px solid #1f2937;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.25);padding:12px}
+    button,select,input[type=range]{-webkit-tap-highlight-color:transparent}
+    button{background:#10b981;border:none;color:white;padding:10px 14px;border-radius:12px;font-weight:700}
+    button.secondary{background:#374151}
+    label{font-size:12px;color:var(--muted)}
+    .meters{display:grid;grid-template-columns:1fr;gap:12px}
+    canvas{width:100%;height:240px;background:#0b1220;border-radius:12px}
+    .hint{font-size:12px;color:var(--muted)}
+    .kv{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+    .kv div{background:#0e1628;border:1px solid #1f2937;border-radius:12px;padding:8px}
+    .kv b{display:block;color:#cbd5e1;font-size:12px;margin-bottom:4px}
+    @media(min-width:720px){.meters{grid-template-columns:1fr 1fr}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <h2 style="margin:0 0 4px 0">Mobile RTA (ไมค์มือถือ)</h2>
+          <div class="hint">แตะ “เริ่มวัด” แล้วให้สิทธิ์ไมโครโฟน • แนะนำใช้หูฟังเพื่อเลี่ยงฟีดแบ็ก • ความถี่/ระดับ dB เป็นค่าประมาณ (ไมค์มือถือไม่แฟลต)</div>
+        </div>
+        <div class="row">
+          <button id="btnStart">▶️ เริ่มวัด</button>
+          <button id="btnStop" class="secondary" disabled>⏸️ หยุด</button>
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label>FFT
+          <select id="fft">
+            <option value="2048">2048</option>
+            <option value="4096" selected>4096</option>
+            <option value="8192">8192</option>
+            <option value="16384">16384</option>
+          </select>
+        </label>
+        <label> Smoothing <input id="smoothing" type="range" min="0" max="0.95" step="0.01" value="0.75"></label>
+        <label> Averaging <input id="avg" type="checkbox" checked></label>
+        <label> A-weighting (เดโม่) <input id="aWeight" type="checkbox"></label>
+      </div>
+      <div class="row">
+        <label>ปิด DSP ของระบบถ้าเป็นไปได้ (บางเครื่องอาจไม่ยอมปิด):</label>
+        <div class="row">
+          <label>echoCancellation <input id="ec" type="checkbox" checked></label>
+          <label>noiseSuppression <input id="ns" type="checkbox" checked></label>
+          <label>autoGainControl <input id="agc" type="checkbox" checked></label>
+        </div>
+      </div>
+    </div>
+
+    <div class="meters">
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
+          <b>RTA แบบละเอียด (Linear FFT)</b>
+          <span class="hint" id="labelRate">—</span>
+        </div>
+        <canvas id="fftCanvas" width="1000" height="320"></canvas>
+      </div>
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
+          <b>RTA แบบ 1/3 Octave</b>
+          <span class="hint" id="labelOct">20 Hz – 20 kHz</span>
+        </div>
+        <canvas id="octCanvas" width="1000" height="320"></canvas>
+      </div>
+    </div>
+
+    <div class="card kv">
+      <div><b>ระดับ RMS (dBFS ประมาณ)</b><span id="rms">—</span></div>
+      <div><b>ความถี่พีคโดยประมาณ</b><span id="peak">—</span></div>
+    </div>
+
+    <div class="card hint">
+      ข้อจำกัดสำคัญ: ไมค์มือถือมักมีฟิลเตอร์ตัด 저ความถี่/ตัดลม, มี AGC/Noise Suppression จากระบบ, และการตอบสนองความถี่ไม่เป็นเส้นตรง จึงใช้ดูแนวโน้ม EQ ได้ แต่ไม่ใช่เครื่องมือวัด SPL แบบมืออาชีพ.
+    </div>
+  </div>
+
+<script>
+(() => {
+  const btnStart = document.getElementById('btnStart');
+  const btnStop = document.getElementById('btnStop');
+  const fftSel = document.getElementById('fft');
+  const smoothing = document.getElementById('smoothing');
+  const avgChk = document.getElementById('avg');
+  const aWeightChk = document.getElementById('aWeight');
+  const ec = document.getElementById('ec');
+  const ns = document.getElementById('ns');
+  const agc = document.getElementById('agc');
+
+  const fftCanvas = document.getElementById('fftCanvas');
+  const octCanvas = document.getElementById('octCanvas');
+  const ctxFFT = fftCanvas.getContext('2d');
+  const ctxOct = octCanvas.getContext('2d');
+  const labelRate = document.getElementById('labelRate');
+  const labelOct = document.getElementById('labelOct');
+  const rmsEl = document.getElementById('rms');
+  const peakEl = document.getElementById('peak');
+
+  let audioCtx, analyser, micSrc, rafId;
+  let dataArray, freqArray;
+  let sampleRate = 48000;
+  let avgBuffer = null; // for exponential averaging per bin
+  let running = false;
+
+  // 1/3 octave center frequencies (IEC-ish) from 20 Hz to 20 kHz
+  const centers = [
+    20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500,
+    630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 20000
+  ];
+  const bands = centers.map(c => ({
+    fc: c,
+    fl: c / Math.pow(2, 1/6), // -1/6 octave
+    fh: c * Math.pow(2, 1/6)  // +1/6 octave
+  }));
+  labelOct.textContent = `${centers[0]} Hz – ${centers[centers.length-1]} Hz`;
+
+  function aWeighting(f){
+    // Simple A-weight approximation (not exact, but fine for trend)
+    const f2 = f*f;
+    const ra = (12200**2 * f2**2) / ((f2 + 20.6**2)*(f2 + 12200**2)*Math.sqrt((f2 + 107.7**2)*(f2 + 737.9**2)));
+    return 20 * Math.log10(ra) + 2.0; // gain in dB
+  }
+
+  function dbfs(v){ return 20*Math.log10(v/255 + 1e-12); }
+
+  function drawBackground(ctx){
+    const {width:w, height:h} = ctx.canvas;
+    ctx.clearRect(0,0,w,h);
+    // grid
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 1;
+    // horizontal lines (dB scale approx)
+    for(let i=0;i<6;i++){
+      const y = (h-20) * (i/5) + 10;
+      ctx.beginPath(); ctx.moveTo(40,y); ctx.lineTo(w-10,y); ctx.stroke();
+    }
+    // left axis box
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.strokeRect(40,10,w-50,h-20);
+  }
+
+  function drawFFT(){
+    const {width:w, height:h} = ctxFFT.canvas;
+    drawBackground(ctxFFT);
+    if(!freqArray) return;
+
+    const N = freqArray.length;
+    // find peak bin
+    let peakBin = 0; let peakVal = -Infinity;
+    for(let i=0;i<N;i++){ if(freqArray[i] > peakVal){ peakVal = freqArray[i]; peakBin = i; } }
+    const freqPerBin = sampleRate / (2*N);
+    const peakFreq = Math.round(peakBin * freqPerBin);
+    peakEl.textContent = `${peakFreq} Hz`;
+
+    ctxFFT.save();
+    ctxFFT.beginPath();
+    for(let i=0;i<N;i++){
+      const v = freqArray[i];
+      const db = dbfs(v);
+      const x = 40 + (i/N)*(w-50);
+      const y = 10 + (1 - Math.min(Math.max((db+100)/100, 0), 1))*(h-20);
+      if(i===0) ctxFFT.moveTo(x,y); else ctxFFT.lineTo(x,y);
+    }
+    ctxFFT.strokeStyle = '#34d399';
+    ctxFFT.lineWidth = 2;
+    ctxFFT.stroke();
+    ctxFFT.restore();
+
+    // labels
+    ctxFFT.fillStyle = 'rgba(255,255,255,0.6)';
+    ctxFFT.font = '12px system-ui';
+    const ticks = [31,63,125,250,500,1000,2000,4000,8000,16000];
+    ticks.forEach(t => {
+      const bin = Math.round(t / freqPerBin);
+      const x = 40 + (bin/N)*(w-50);
+      ctxFFT.fillText(t>=1000? (t/1000)+ 'k' : t, x-6, h-4);
+    });
+  }
+
+  function drawOctave(){
+    const {width:w, height:h} = ctxOct.canvas;
+    drawBackground(ctxOct);
+    if(!freqArray) return;
+
+    const N = freqArray.length;
+    const freqPerBin = sampleRate / (2*N);
+
+    const vals = bands.map(b => {
+      const start = Math.max(0, Math.floor(b.fl / freqPerBin));
+      const end = Math.min(N-1, Math.ceil(b.fh / freqPerBin));
+      let sum=0; let count=0;
+      for(let i=start;i<=end;i++){ sum += freqArray[i]; count++; }
+      let v = count? (sum/count) : 0;
+      if(aWeightChk.checked){
+        const aw = aWeighting(b.fc);
+        v = v * Math.pow(10, aw/20); // apply in linear magnitude
+      }
+      return v;
+    });
+
+    const barW = (w-50) / vals.length;
+    ctxOct.fillStyle = '#60a5fa';
+    for(let i=0;i<vals.length;i++){
+      const db = dbfs(vals[i]);
+      const x = 40 + i*barW + 2;
+      const y = 10 + (1 - Math.min(Math.max((db+100)/100, 0), 1))*(h-20);
+      const height = (h-20) - (y-10);
+      ctxOct.fillRect(x, y, barW-4, height);
+    }
+
+    // labels (few to avoid clutter)
+    ctxOct.fillStyle = 'rgba(255,255,255,0.7)';
+    ctxOct.font = '12px system-ui';
+    const labelIdx = [0, 6, 12, 18, 22, 26, 30];
+    labelIdx.forEach(i => {
+      if(i < centers.length){
+        const x = 40 + i*barW + 2;
+        const txt = centers[i] >= 1000 ? (centers[i]/1000)+'k' : centers[i];
+        ctxOct.fillText(txt, x, h-4);
+      }
+    });
+  }
+
+  function updateRMS(){
+    if(!dataArray) return;
+    let sum = 0;
+    for(let i=0;i<dataArray.length;i++){
+      const v = (dataArray[i]-128)/128; // time domain 8-bit centered at 128
+      sum += v*v;
+    }
+    const rms = Math.sqrt(sum / dataArray.length);
+    // approximate dBFS from 0..1 RMS
+    const db = 20*Math.log10(rms + 1e-12);
+    rmsEl.textContent = `${db.toFixed(1)} dBFS`;
+  }
+
+  function loop(){
+    if(!running) return;
+    analyser.getByteTimeDomainData(dataArray);
+    analyser.getByteFrequencyData(freqArray);
+
+    // exponential averaging per bin if enabled
+    if(avgChk.checked){
+      if(!avgBuffer || avgBuffer.length !== freqArray.length){
+        avgBuffer = new Float32Array(freqArray.length);
+      }
+      const alpha = 0.5; // averaging factor
+      for(let i=0;i<freqArray.length;i++){
+        avgBuffer[i] = alpha*avgBuffer[i] + (1-alpha)*freqArray[i];
+      }
+      for(let i=0;i<freqArray.length;i++) freqArray[i] = avgBuffer[i];
+    }
+
+    drawFFT();
+    drawOctave();
+    updateRMS();
+
+    rafId = requestAnimationFrame(loop);
+  }
+
+  async function start(){
+    try{
+      btnStart.disabled = true;
+      btnStop.disabled = false;
+
+      const constraints = {
+        audio: {
+          echoCancellation: ec.checked ? false : true, // invert UI intention: try request false
+          noiseSuppression: ns.checked ? false : true,
+          autoGainControl: agc.checked ? false : true
+        }
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+      // iOS ต้อง resume จาก gesture อยู่แล้ว เรามาเช็คอีกทีก็ได้
+      if(audioCtx.state === 'suspended') await audioCtx.resume();
+
+      sampleRate = audioCtx.sampleRate;
+      labelRate.textContent = `${Math.round(sampleRate)} Hz`;
+
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = parseInt(fftSel.value, 10);
+      analyser.smoothingTimeConstant = parseFloat(smoothing.value);
+
+      micSrc = audioCtx.createMediaStreamSource(stream);
+      micSrc.connect(analyser);
+
+      dataArray = new Uint8Array(analyser.fftSize);
+      freqArray = new Uint8Array(analyser.frequencyBinCount);
+
+      running = true;
+      loop();
+    }catch(err){
+      console.error(err);
+      alert('เปิดไมโครโฟนไม่สำเร็จ: ' + (err.message || err));
+      btnStart.disabled = false; btnStop.disabled = true;
+    }
+  }
+
+  function stop(){
+    running = false;
+    if(rafId) cancelAnimationFrame(rafId);
+    try{ if(micSrc) micSrc.disconnect(); }catch(_){ }
+    try{ if(analyser) analyser.disconnect(); }catch(_){ }
+    if(audioCtx){ audioCtx.close(); }
+    btnStart.disabled = false; btnStop.disabled = true;
+  }
+
+  // UI events
+  btnStart.addEventListener('click', start, {passive:true});
+  btnStop.addEventListener('click', stop, {passive:true});
+  fftSel.addEventListener('change', () => { if(analyser){ analyser.fftSize = parseInt(fftSel.value,10); dataArray = new Uint8Array(analyser.fftSize); freqArray = new Uint8Array(analyser.frequencyBinCount); }});
+  smoothing.addEventListener('input', () => { if(analyser){ analyser.smoothingTimeConstant = parseFloat(smoothing.value); }});
+  aWeightChk.addEventListener('change', () => {});
+
+  // Safety: prevent scrolling while sliding on range on iOS
+  document.querySelectorAll('input[type=range]').forEach(el => {
+    el.addEventListener('touchmove', e => e.stopPropagation(), {passive:true});
+  });
+})();
+</script>
+</body>
+</html>
