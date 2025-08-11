@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <title>Mobile RTA (Peak นอกกราฟ) — FFT + 1/3 Octave (Log)</title>
+  <title>Mobile RTA (เพิ่มเส้นตั้งตำแหน่งพีค) — FFT + 1/3 Octave (Log)</title>
   <style>
     :root{ --bg1:#0b1220; --bg2:#0a1120; --card:#111827; --text:#e5e7eb; --muted:#9ca3af; }
     html,body{margin:0;height:100%;background:radial-gradient(1200px 600px at 70% -10%, #0f1730 10%, var(--bg1) 60%, var(--bg2) 100%);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans Thai",sans-serif}
@@ -30,7 +30,7 @@
     <div class="card">
       <div class="row" style="justify-content:space-between">
         <div>
-          <h2 style="margin:0 0 4px 0">Mobile RTA (Peak นอกกราฟ)</h2>
+          <h2 style="margin:0 0 4px 0">Mobile RTA (เพิ่มเส้นตั้งตำแหน่งพีค)</h2>
           <div class="hint">แกน X = Log (20 Hz → 20 kHz) • Hold Peak ใช้ได้ทั้ง FFT และ 1/3 Octave • ใช้ผ่าน HTTPS</div>
         </div>
         <div class="row">
@@ -100,7 +100,7 @@
 
 <script>
 (() => {
-  // Padding plot (เว้นที่ตัวเลขแกนล่าง)
+  // พื้นที่เว้นรอบ Plot (เพิ่ม B เพื่อไม่ให้เลข Hz โดนทับ)
   const PAD = { L: 40, R: 10, T: 10, B: 32 };
 
   // สีกริดแบบจาง
@@ -109,6 +109,10 @@
   const FRAME  = 'rgba(255,255,255,0.08)';
   const LABEL  = 'rgba(255,255,255,0.55)';
   const LABEL_Y = 10;
+
+  // สี “เส้นตั้งบอกพีค”
+  const PEAK_LINE  = 'rgba(96,165,250,0.6)';   // ฟ้าโปร่ง ๆ (ปัจจุบัน)
+  const HOLD_LINE  = 'rgba(250,204,21,0.55)';  // เหลืองโปร่ง (Hold)
 
   // DOM
   const btnStart = document.getElementById('btnStart');
@@ -172,7 +176,7 @@
     return PAD.T + (1 - norm) * plotH;
   }
 
-  // Background + grid + labels
+  // พื้นหลัง + กริด + เลเบล
   function drawBackground(ctx){
     const {width:w, height:h} = ctx.canvas;
     ctx.clearRect(0,0,w,h);
@@ -200,6 +204,17 @@
       const x=mapLogX(t,w);
       ctx.fillText(t>=1000?(t/1000)+'k':t, x-8, h - LABEL_Y);
     });
+  }
+
+  // วาด “เส้นตั้งตำแหน่งพีค”
+  function drawPeakLine(ctx, x, h, color, dashed=false){
+    const y0 = PAD.T, y1 = h - PAD.B;
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    if(dashed) ctx.setLineDash([5,5]);
+    ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y1); ctx.stroke();
+    ctx.restore();
   }
 
   function drawFFT(){
@@ -239,11 +254,18 @@
     }
     ctxFFT.save(); ctxFFT.globalAlpha=0.35; ctxFFT.strokeStyle='#a78bfa'; ctxFFT.lineWidth=1.25; ctxFFT.stroke(); ctxFFT.restore();
 
-    // อัปเดตป้ายด้านนอกกราฟ
-    fftPeakText.textContent = `Peak: ${fmtHz(peakFreqNow)} • ${peakDbNow.toFixed(1)} dBFS`;
-    // หาค่า hold สูงสุด
+    // เส้นตั้งตำแหน่งพีค (ปัจจุบัน + hold)
+    const xPeakNow = mapLogX(peakFreqNow, w);
+    drawPeakLine(ctxFFT, xPeakNow, h, PEAK_LINE, false);
     let holdBin=0, holdVal=0;
     for(let i=0;i<N;i++){ if(peakArray[i]>holdVal){ holdVal=peakArray[i]; holdBin=i; } }
+    if(holdVal>0){
+      const xHold = mapLogX(holdBin*fpb, w);
+      drawPeakLine(ctxFFT, xHold, h, HOLD_LINE, true);
+    }
+
+    // ป้ายด้านนอกกราฟ
+    fftPeakText.textContent = `Peak: ${fmtHz(peakFreqNow)} • ${peakDbNow.toFixed(1)} dBFS`;
     if(holdVal>0){
       fftHoldText.style.display='';
       fftHoldText.textContent = `Hold: ${fmtHz(holdBin*fpb)} • ${dbfs(holdVal).toFixed(1)} dBFS`;
@@ -297,13 +319,21 @@
       ctxOct.fillRect(cx-1.5, y-1.5, 3, 3);
     }
 
-    // อัปเดตป้ายด้านนอกกราฟ
+    // หาตำแหน่งพีคของย่าน (ปัจจุบัน + hold)
     let idxNow=0, vNow=-1;
     for(let i=0;i<vals.length;i++){ if(vals[i]>vNow){ vNow=vals[i]; idxNow=i; } }
-    octPeakText.textContent = `Peak: ${fmtHz(bands[idxNow].fc)} • ${dbfs(vNow).toFixed(1)} dBFS`;
+    const xPeakNow = mapLogX(bands[idxNow].fc, w);
+    drawPeakLine(ctxOct, xPeakNow, h, PEAK_LINE, false);
 
     let idxHold=0, vHold=0;
     for(let i=0;i<peakOct.length;i++){ if(peakOct[i]>vHold){ vHold=peakOct[i]; idxHold=i; } }
+    if(vHold>0){
+      const xHold = mapLogX(bands[idxHold].fc, w);
+      drawPeakLine(ctxOct, xHold, h, HOLD_LINE, true);
+    }
+
+    // ป้ายด้านนอกกราฟ
+    octPeakText.textContent = `Peak: ${fmtHz(bands[idxNow].fc)} • ${dbfs(vNow).toFixed(1)} dBFS`;
     if(vHold>0){
       octHoldText.style.display='';
       octHoldText.textContent = `Hold: ${fmtHz(bands[idxHold].fc)} • ${dbfs(vHold).toFixed(1)} dBFS`;
