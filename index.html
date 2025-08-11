@@ -200,7 +200,7 @@
     ctx.strokeStyle = 'rgba(255,255,255,0.08)';
     ctx.strokeRect(40,10,w-50,h-20);
 
-    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
     ctx.font = '12px system-ui';
     const labelTicks = [31.5,63,125,250,500,1000,2000,4000,8000,16000];
     labelTicks.forEach(t => {
@@ -323,19 +323,18 @@
     ctx.clearRect(0,0,w,h);
 
     // frame
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
     ctx.strokeRect(40,10,w-50,h-20);
 
     // horizontal grid
-    ctx.strokeStyle = 'rgba(255,255,255,0.05)'
+    ctx.strokeStyle = 'rgba(255,255,255,0.035)'
     for(let i=0;i<6;i++){
       const y = (h-20) * (i/5) + 10;
       ctx.beginPath(); ctx.moveTo(40,y); ctx.lineTo(w-10,y); ctx.stroke();
     }
 
     // vertical log freq ticks
-    const ticks = [31.5,63,125,250,500,1000,2000,4000,8000,16000];
-    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.035)';
     const fmin = 20; const fmax = Math.min(sampleRate/2, 20000);
     ticks.forEach(t => {
       const x = 40 + (Math.log10(t) - Math.log10(fmin)) / (Math.log10(fmax) - Math.log10(fmin)) * (w-50);
@@ -359,7 +358,7 @@
     const iw = x1 - x0; const ih = y1 - y0; // ความสูงพื้นที่พล็อตจริง (ในกรอบ)
 
     // scroll up 1px within plot area
-    ctxHeat.drawImage(heatCanvas, x0, y0+1, iw, ih-1, x0, y0, iw, ih-1); // เลื่อนภาพขึ้น 1px
+    try{ const img = ctxHeat.getImageData(x0, y0+1, iw, ih-1); ctxHeat.putImageData(img, x0, y0); } catch(e){ ctxHeat.drawImage(heatCanvas, x0, y0+1, iw, ih-1, x0, y0, iw, ih-1); } // เลื่อนภาพขึ้น 1px (fallback drawImage)
 
     const N = freqArray.length;
     const fpb = sampleRate / (2*N);
