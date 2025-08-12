@@ -2,14 +2,14 @@
 <html lang="th">
 <head>
   <meta charset="utf-8" />
-  <!-- ปิดขอบขาว/กินพื้นที่ notch บน iOS -->
+  <!-- กัน “ขอบขาว”/กินพื้นที่ notch บน iOS -->
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#0a1120" />
   <meta name="theme-color" content="#0a1120" media="(prefers-color-scheme: dark)" />
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
-  <title>Mobile RTA (เพิ่มเส้นตั้งตำแหน่งพีค + กันขอบขาว iOS) — FFT + 1/3 Octave (Log)</title>
+  <title>Mobile RTA (เพิ่มเส้นตั้งพีค + กันขอบขาว iOS + 1/3·1/6 Octave) — FFT + Octave</title>
 
   <style>
     :root{
@@ -27,19 +27,12 @@
       -webkit-touch-callout:none; -webkit-user-select:none; user-select:none;
       overscroll-behavior:contain;
     }
-    /* ทับ safe-area ให้เป็นสีธีม (กันแถบขาว) */
-    body::before, body::after{
-      content:""; position:fixed; left:0; right:0; z-index:9999; pointer-events:none; background:#0a1120;
-    }
-    body::before{ top:0;    height:env(safe-area-inset-top); }
-    body::after { bottom:0; height:env(safe-area-inset-bottom); }
+    /* เติม safe-area ให้เป็นสีธีม */
+    body::before, body::after{content:"";position:fixed;left:0;right:0;z-index:9999;background:#0a1120;pointer-events:none}
+    body::before{top:0;height:env(safe-area-inset-top)} body::after{bottom:0;height:env(safe-area-inset-bottom)}
     @supports (padding: env(safe-area-inset-left)) {
-      html::before, html::after{
-        content:""; position:fixed; top:0; bottom:0; width: env(safe-area-inset-left);
-        background:#0a1120; z-index:9998; pointer-events:none;
-      }
-      html::after{ left:auto; right:0; width: env(safe-area-inset-right); }
-      html::before{ left:0; }
+      html::before, html::after{content:"";position:fixed;top:0;bottom:0;background:#0a1120;z-index:9998;pointer-events:none}
+      html::before{left:0;width:env(safe-area-inset-left)} html::after{right:0;width:env(safe-area-inset-right)}
     }
 
     .wrap{display:flex;flex-direction:column;gap:12px;max-width:920px;margin:0 auto;
@@ -65,12 +58,9 @@
     .badges{display:flex;justify-content:flex-end;gap:6px;margin:4px 0 6px 0}
     .badge{padding:4px 8px;border-radius:999px;background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.12);font-size:12px;color:#e5e7eb;white-space:nowrap}
 
-    /* ป้าย Hz ของเส้นประตอนแตะค้าง */
-    .tip{
-      position:absolute; padding:4px 6px; font-size:12px; color:#e5e7eb;
-      background:rgba(0,0,0,.6); border:1px solid rgba(255,255,255,.12); border-radius:8px;
-      transform:translate(-50%,-100%); pointer-events:none; white-space:nowrap;
-    }
+    /* ป้าย Hz ตอนแตะค้าง */
+    .tip{position:absolute;padding:4px 6px;font-size:12px;color:#e5e7eb;background:rgba(0,0,0,.6);
+      border:1px solid rgba(255,255,255,.12);border-radius:8px;transform:translate(-50%,-100%);pointer-events:none;white-space:nowrap}
     .plot{ position:relative; }
   </style>
 </head>
@@ -79,8 +69,8 @@
     <div class="card">
       <div class="row" style="justify-content:space-between">
         <div>
-          <h2 style="margin:0 0 4px 0">Mobile RTA (เพิ่มเส้นตั้งตำแหน่งพีค + กันขอบขาว iOS)</h2>
-          <div class="hint">แกน X = Log (20 Hz → 20 kHz) • Hold Peak ใช้ได้ทั้ง FFT และ 1/3 Octave • แตะค้างบนกราฟเพื่อดู Hz ชั่วคราว</div>
+          <h2 style="margin:0 0 4px 0">Mobile RTA (เพิ่มเส้นตั้งพีค + กันขอบขาว iOS + 1/3·1/6)</h2>
+          <div class="hint">แกน X = Log (20 Hz → 20 kHz) • Hold Peak ใช้ได้ทั้ง FFT และ Octave • แตะค้างบนกราฟเพื่อดู Hz ชั่วคราว</div>
         </div>
         <div class="row">
           <button id="btnStart">▶️ เริ่มวัด</button>
@@ -129,11 +119,19 @@
         </div>
       </div>
 
-      <!-- 1/3 Oct -->
+      <!-- OCTAVE -->
       <div class="card">
         <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:2px">
-          <b>RTA แบบ 1/3 Octave (Log Axis)</b>
-          <span class="hint" id="labelOct">20 Hz – 20 kHz</span>
+          <b id="octTitle">RTA แบบ 1/3 Octave (Log Axis)</b>
+          <span class="row" style="gap:10px;align-items:center">
+            <span class="hint" id="labelOct">20 Hz – 20 kHz</span>
+            <label>Octave
+              <select id="octRes">
+                <option value="3" selected>1/3</option>
+                <option value="6">1/6</option>
+              </select>
+            </label>
+          </span>
         </div>
         <div class="badges">
           <span class="badge" id="octPeakText">Peak: —</span>
@@ -156,16 +154,17 @@
 
 <script>
 (() => {
-  // Padding ของพื้นที่พล็อต (กันเลข Hz ชนขอบ)
+  // พื้นที่เว้นรอบ Plot
   const PAD = { L: 40, R: 10, T: 10, B: 32 };
   const LABEL_Y = 10;
 
-  // สีช่วยวาด
+  // สีกริด
   const GRID_H = getComputedStyle(document.documentElement).getPropertyValue('--gridH').trim();
   const GRID_V = getComputedStyle(document.documentElement).getPropertyValue('--gridV').trim();
   const FRAME  = getComputedStyle(document.documentElement).getPropertyValue('--frame').trim();
   const LABEL  = getComputedStyle(document.documentElement).getPropertyValue('--label').trim();
 
+  // DOM
   const btnStart = document.getElementById('btnStart');
   const btnStop  = document.getElementById('btnStop');
   const btnHold  = document.getElementById('btnHold');
@@ -192,9 +191,12 @@
 
   const labelRate = document.getElementById('labelRate');
   const labelOct  = document.getElementById('labelOct');
+  const octTitle  = document.getElementById('octTitle');
   const rmsEl = document.getElementById('rms');
   const peakEl= document.getElementById('peak');
+  const octResSel = document.getElementById('octRes');
 
+  // Audio state
   let audioCtx, analyser, micSrc, rafId;
   let dataArray, freqArray;
   let sampleRate = 48000;
@@ -204,25 +206,24 @@
   // Hold Peak
   let holdEnabled = false;
   let peakArray = null; // FFT
-  let peakOct   = null; // 1/3 octave
+  let peakOct   = null; // Oct bands
 
   // เส้นประชั่วคราวตอนกดค้าง
-  let guideFFT = null; // {xPx, freq}
+  let guideFFT = null;
   let guideOCT = null;
 
-  // 1/3 octave bands
-  const centers = [20,25,31.5,40,50,63,80,100,125,160,200,250,315,400,500,630,800,1000,1250,1600,2000,2500,3150,4000,5000,6300,8000,10000,12500,16000,20000];
-  const bands   = centers.map(c => ({ fc:c, fl:c/Math.pow(2,1/6), fh:c*Math.pow(2,1/6) }));
-  labelOct.textContent = `${centers[0]} Hz – ${centers[centers.length-1]} Hz`;
+  // Octave resolution state (n=3 -> 1/3, n=6 -> 1/6)
+  let octN = 3;
+  let bands = []; // [{fc, fl, fh}]
 
-  // Helpers
+  // ==== Helpers ====
   const dbfs = v => 20*Math.log10(v/255 + 1e-12);
   const clamp01 = v => Math.min(1, Math.max(0,v));
   function aWeighting(f){ const f2=f*f; const ra=(12200**2*f2**2)/((f2+20.6**2)*(f2+12200**2)*Math.sqrt((f2+107.7**2)*(f2+737.9**2))); return 20*Math.log10(ra)+2.0; }
   function fmtHz(f){ return f>=1000 ? ((f/1000>=10? (f/1000).toFixed(0):(f/1000).toFixed(1))+' kHz') : (Math.round(f)+' Hz'); }
+  const fmax = () => Math.min(sampleRate/2, 20000);
 
-  function fmax(){ return Math.min(sampleRate/2, 20000); }
-
+  // map <-> screen
   function mapLogX(f, width){
     const fmin=20, fm=fmax();
     const t=(Math.log10(Math.max(f,fmin))-Math.log10(fmin))/(Math.log10(fm)-Math.log10(fmin));
@@ -241,6 +242,28 @@
     return PAD.T + (1 - norm) * plotH;
   }
 
+  // สร้างย่านแบบ 1/n octave (ศูนย์อิง 1 kHz)
+  function genBands(n){
+    const r = Math.pow(2, 1/n);                 // factor ต่อหนึ่งย่าน
+    const fmin = 20, fm = fmax();
+    const kmin = Math.ceil( Math.log(fmin/1000) / Math.log(r) );
+    const kmax = Math.floor( Math.log(fm/1000)   / Math.log(r) );
+    const edgeHalf = Math.pow(2, 1/(2*n));      // ครึ่งหนึ่งของความกว้างย่าน
+
+    const arr = [];
+    for(let k=kmin; k<=kmax; k++){
+      const fc = 1000 * Math.pow(r, k);
+      const fl = fc / edgeHalf;
+      const fh = fc * edgeHalf;
+      if(fh < fmin || fl > fm) continue;
+      arr.push({fc, fl: Math.max(fl, fmin), fh: Math.min(fh, fm)});
+    }
+    labelOct.textContent = `${Math.round(arr[0].fc)} Hz – ${Math.round(arr[arr.length-1].fc)} Hz`;
+    octTitle.textContent = `RTA แบบ 1/${n} Octave (Log Axis)`;
+    return arr;
+  }
+
+  // ==== พื้นหลัง/กริด ====
   function drawBackground(ctx){
     const {width:w, height:h} = ctx.canvas;
     ctx.clearRect(0,0,w,h);
@@ -252,7 +275,7 @@
       const y = PAD.T + (i/5) * plotH;
       ctx.beginPath(); ctx.moveTo(PAD.L,y); ctx.lineTo(w-PAD.R,y); ctx.stroke();
     }
-    // แนวตั้ง (tick log)
+    // แนวตั้ง log ticks
     ctx.strokeStyle = GRID_V;
     const ticks=[20,31.5,40,50,63,80,100,125,160,200,250,315,400,500,630,800,1000,2000,4000,8000,16000];
     ticks.forEach(t=>{ const x=mapLogX(t,w); ctx.beginPath(); ctx.moveTo(x,PAD.T); ctx.lineTo(x, PAD.T+plotH); ctx.stroke(); });
@@ -280,15 +303,14 @@
     ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y1); ctx.stroke();
     ctx.restore();
   }
-
-  function drawGuide(ctx, x, h){ // เส้นประแนวตั้งตอนแตะค้าง
+  function drawGuide(ctx, x, h){
     ctx.save();
-    ctx.strokeStyle = 'rgba(96,165,250,.75)';
-    ctx.setLineDash([4,4]);
+    ctx.strokeStyle = 'rgba(96,165,250,.75)'; ctx.setLineDash([4,4]);
     ctx.beginPath(); ctx.moveTo(x, PAD.T); ctx.lineTo(x, h-PAD.B); ctx.stroke();
     ctx.restore();
   }
 
+  // ==== วาด FFT ====
   function drawFFT(){
     const {width:w,height:h} = ctxFFT.canvas;
     drawBackground(ctxFFT);
@@ -327,30 +349,26 @@
     }
     ctxFFT.save(); ctxFFT.globalAlpha=0.35; ctxFFT.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue('--peak').trim(); ctxFFT.lineWidth=1.25; ctxFFT.stroke(); ctxFFT.restore();
 
-    // เส้นตั้งตำแหน่งพีค (current + hold)
+    // เส้นพีค (current + hold)
     const xPeakNow = mapLogX(peakFreqNow, w);
     drawPeakLine(ctxFFT, xPeakNow, h, 'rgba(96,165,250,0.6)', false);
     let holdBin=0, holdVal=0;
     for(let i=0;i<N;i++){ if(peakArray[i]>holdVal){ holdVal=peakArray[i]; holdBin=i; } }
-    if(holdVal>0){
-      const xHold = mapLogX(holdBin*fpb, w);
-      drawPeakLine(ctxFFT, xHold, h, 'rgba(250,204,21,0.55)', true);
-    }
+    if(holdVal>0){ drawPeakLine(ctxFFT, mapLogX(holdBin*fpb, w), h, 'rgba(250,204,21,0.55)', true); }
 
     // ป้ายด้านนอกกราฟ
     fftPeakText.textContent = `Peak: ${fmtHz(peakFreqNow)} • ${peakDbNow.toFixed(1)} dBFS`;
-    if(holdVal>0){
-      fftHoldText.style.display=''; fftHoldText.textContent = `Hold: ${fmtHz(holdBin*fpb)} • ${dbfs(holdVal).toFixed(1)} dBFS`;
-    }else{ fftHoldText.style.display='none'; }
+    if(holdVal>0){ fftHoldText.style.display=''; fftHoldText.textContent = `Hold: ${fmtHz(holdBin*fpb)} • ${dbfs(holdVal).toFixed(1)} dBFS`; }
+    else { fftHoldText.style.display='none'; }
 
-    // เส้นประชั่วคราวจากการแตะค้าง
     if(guideFFT){ drawGuide(ctxFFT, guideFFT.xPx, h); }
   }
 
+  // ==== วาด Octave ====
   function drawOctave(){
     const {width:w,height:h} = ctxOct.canvas;
     drawBackground(ctxOct);
-    if(!freqArray) return;
+    if(!freqArray || !bands.length) return;
 
     const N=freqArray.length; const fpb=sampleRate/(2*N);
 
@@ -389,29 +407,21 @@
     // ตำแหน่งพีค (current + hold)
     let idxNow=0, vNow=-1;
     for(let i=0;i<vals.length;i++){ if(vals[i]>vNow){ vNow=vals[i]; idxNow=i; } }
-    const xPeakNow = mapLogX(bands[idxNow].fc, w);
-    drawPeakLine(ctxOct, xPeakNow, h, 'rgba(96,165,250,0.6)', false);
+    drawPeakLine(ctxOct, mapLogX(bands[idxNow].fc,w), h, 'rgba(96,165,250,0.6)', false);
 
     let idxHold=0, vHold=0;
     for(let i=0;i<peakOct.length;i++){ if(peakOct[i]>vHold){ vHold=peakOct[i]; idxHold=i; } }
-    if(vHold>0){
-      const xHold = mapLogX(bands[idxHold].fc, w);
-      drawPeakLine(ctxOct, xHold, h, 'rgba(250,204,21,0.55)', true);
-    }
+    if(vHold>0){ drawPeakLine(ctxOct, mapLogX(bands[idxHold].fc,w), h, 'rgba(250,204,21,0.55)', true); }
 
     // ป้ายด้านนอกกราฟ
     octPeakText.textContent = `Peak: ${fmtHz(bands[idxNow].fc)} • ${dbfs(vNow).toFixed(1)} dBFS`;
-    if(vHold>0){
-      octHoldText.style.display='';
-      octHoldText.textContent = `Hold: ${fmtHz(bands[idxHold].fc)} • ${dbfs(vHold).toFixed(1)} dBFS`;
-    }else{
-      octHoldText.style.display='none';
-    }
+    if(vHold>0){ octHoldText.style.display=''; octHoldText.textContent = `Hold: ${fmtHz(bands[idxHold].fc)} • ${dbfs(vHold).toFixed(1)} dBFS`; }
+    else { octHoldText.style.display='none'; }
 
-    // เส้นประชั่วคราวจากการแตะค้าง
     if(guideOCT){ drawGuide(ctxOct, guideOCT.xPx, h); }
   }
 
+  // ==== RMS ====
   function updateRMS(){
     if(!dataArray) return;
     let sum=0; for(let i=0;i<dataArray.length;i++){ const v=(dataArray[i]-128)/128; sum+=v*v; }
@@ -459,7 +469,10 @@
       dataArray=new Uint8Array(analyser.fftSize);
       freqArray=new Uint8Array(analyser.frequencyBinCount);
       peakArray=new Uint8Array(analyser.frequencyBinCount);
-      peakOct  =new Float32Array(centers.length);
+
+      // สร้างย่านตามโหมดเริ่มต้น
+      bands = genBands(octN);
+      peakOct = new Float32Array(bands.length);
 
       running=true; loop();
     }catch(err){
@@ -474,42 +487,34 @@
     btnStart.disabled=false; btnStop.disabled=true;
   }
 
-  // === แตะค้างเพื่อแสดงเส้นประ+ป้าย Hz ชั่วคราว ===
-  function attachPressGuide(canvas, tipEl, which){ // which = 'fft'|'oct'
-    let pressed = false;
-
+  // แตะค้างเพื่อเส้นประ+ป้าย Hz
+  function attachPressGuide(canvas, tipEl, which){
+    let pressed=false;
     const getX = (e) => {
       const rect = canvas.getBoundingClientRect();
-      const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
-      return Math.max(PAD.L, Math.min(canvas.width-PAD.R, x * (canvas.width/rect.width)));
-      // ^ scale X จาก CSS pixel -> canvas pixel
+      const xCss = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+      // scale CSS px -> canvas px
+      return Math.max(PAD.L, Math.min(canvas.width-PAD.R, xCss * (canvas.width/rect.width)));
     };
-
     const update = (xPx) => {
       const freq = xToFreq(xPx, canvas.width);
       const plot = canvas.parentElement.getBoundingClientRect();
-      tipEl.style.display = 'block';
+      tipEl.style.display='block';
       tipEl.textContent = fmtHz(freq);
-      // ตำแหน่งป้าย: ให้อยู่เหนือเส้นในกรอบ
       const cssX = (xPx / canvas.width) * plot.width;
       tipEl.style.left = cssX + 'px';
-      tipEl.style.top  = (8) + 'px';
+      tipEl.style.top  = '8px';
       if(which==='fft') guideFFT = {xPx, freq}; else guideOCT = {xPx, freq};
     };
+    const clear = () => { tipEl.style.display='none'; if(which==='fft') guideFFT=null; else guideOCT=null; };
 
-    const clear = () => {
-      tipEl.style.display='none';
-      if(which==='fft') guideFFT=null; else guideOCT=null;
-    };
+    const onDown = (e)=>{ pressed=true; e.preventDefault(); update(getX(e)); };
+    const onMove = (e)=>{ if(!pressed) return; e.preventDefault(); update(getX(e)); };
+    const onUp   = (_)=>{ pressed=false; clear(); };
 
-    const onDown = (e) => { pressed=true; e.preventDefault(); update(getX(e)); };
-    const onMove = (e) => { if(!pressed) return; e.preventDefault(); update(getX(e)); };
-    const onUp   = (_e)=> { pressed=false; clear(); };
-
-    // touch + mouse
     canvas.addEventListener('touchstart', onDown, {passive:false});
-    canvas.addEventListener('touchmove',  onMove, {passive:false});
-    canvas.addEventListener('touchend',   onUp,   {passive:false});
+    canvas.addEventListener('touchmove',  onMove,  {passive:false});
+    canvas.addEventListener('touchend',   onUp,    {passive:false});
     canvas.addEventListener('mousedown',  onDown);
     window.addEventListener('mousemove',  onMove);
     window.addEventListener('mouseup',    onUp);
@@ -518,7 +523,7 @@
   attachPressGuide(fftCanvas, fftTip, 'fft');
   attachPressGuide(octCanvas, octTip, 'oct');
 
-  // === Events หลัก ===
+  // Events
   btnStart.addEventListener('click', start, {passive:true});
   btnStop .addEventListener('click', stop , {passive:true});
   btnHold .addEventListener('click', ()=>{
@@ -536,11 +541,20 @@
     dataArray=new Uint8Array(analyser.fftSize);
     freqArray=new Uint8Array(analyser.frequencyBinCount);
     peakArray=new Uint8Array(analyser.frequencyBinCount);
-    peakOct  =new Float32Array(centers.length);
+    // รีคำนวณย่านตาม octN เดิม
+    bands = genBands(octN);
+    peakOct = new Float32Array(bands.length);
   });
   smoothing.addEventListener('input', ()=>{ if(analyser) analyser.smoothingTimeConstant=parseFloat(smoothing.value); });
 
-  // อนุญาตให้ select/โฟกัสเฉพาะคอนโทรล
+  // เปลี่ยนโหมด 1/3 ↔ 1/6
+  octResSel.addEventListener('change', ()=>{
+    octN = parseInt(octResSel.value,10);         // 3 หรือ 6
+    bands = genBands(octN);
+    peakOct = new Float32Array(bands.length);    // รีเซ็ต hold
+  });
+
+  // อนุญาต select/โฟกัสเฉพาะคอนโทรล (กันไฮไลต์ตอนลากบนมือถือ)
   ['input','select','button','label'].forEach(sel=>{
     document.querySelectorAll(sel).forEach(el=>{
       el.style.webkitUserSelect='auto'; el.style.userSelect='auto';
